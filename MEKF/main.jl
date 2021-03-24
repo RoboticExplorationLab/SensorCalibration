@@ -15,18 +15,19 @@ c0 = 5 * randn(i, 1)
 wc, wα, wϵ = 1, 1, 1
 
 # load mekf_inputs
-vars = matread("mekf_inputs.mat")
+vars = matread("TemplateCode/mekf_inputs.mat")
 rN1 = vars["rN1"][:,1]      # Pair of vectors in newtonian (inertial) frame (~noiseless?)
 rN2 = vars["rN2"][:,1]
 rB1hist = vars["rB1hist"]   # Sets of vectors in body frame (noisy)
 rB2hist = vars["rB2hist"]
 W = vars["W"]
-WVals =  diag(W)
-WVals = [WVals; ones(i,1)*wc; ones(i,1)*wα; ones(i,1)*wϵ]
-W = Diagonal(WVals[:,1])
-
+# WVals =  diag(W)
+# WVals = [WVals; ones(i,1)*wc; ones(i,1)*wα; ones(i,1)*wϵ]
+# W = Diagonal(WVals[:,1]) # Needs to be size [6 + 3i, 6 + 3i]
+W = W[1,1] .* I(6+3*i)
 
 V = vars["V"]
+V = V[1,1] .* I(6+i) # 6 for getting rotation, i for current measurements
 whist = vars["whist"]
 dt = vars["dt"]             # Time step
 
@@ -36,18 +37,17 @@ yhist = [rB1hist; rB2hist]; # Measurements (bodyframe vectors)
 # Initial quaternion estimate (scalar first)
 q0, R = triad(rN1,rN2,rB1hist[:,1],rB2hist[:,2]);
 β0 = [0;0;0];
-ang0 = [α0; ϵ0];
 
-x0 = [q0; β0; c0; α0; ϵ0]; # Initialize with no bias, α=ϵ=0
+x0 = [q0; β0; c0; α0; ϵ0]; # Initialize with no bias, c=α=ϵ=rand, [7 x 3i]
 
 
 # Correct dimensions for P?
-P0 = (10*pi/180)^2*I((size(x0, 1) - 1)); # 10 deg. and 10 deg/sec 1-sigma uncertainty + quaternions use an extra variable, so we subtract off
+P0 = (10*pi/180)^2 * I((size(x0, 1) - 1)); # 10 deg. and 10 deg/sec 1-sigma uncertainty + quaternions use an extra variable, so we subtract off
 
 xhist, Phist = mekf(x0,P0,W,V,rN,whist,yhist, dt, i);
 
 # load mekf_truth
-vars = matread("mekf_truth.mat")
+vars = matread("TemplateCode/mekf_truth.mat")
 btrue = vars["btrue"]
 qtrue = vars["qtrue"]
 

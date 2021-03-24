@@ -1,4 +1,7 @@
-function measurement(x,rN, numDiodes)
+function measurement(x, rN, numDiodes)
+    # (1) Get Sun Vector (Right now I just make one up) 
+
+
     # Generates the "measured" body vectors for a set of 
     #      newtonian (inertial) vectors using quaternion q
     #      (What our measurement would be given our estimated attitude)
@@ -25,45 +28,49 @@ function measurement(x,rN, numDiodes)
     # this is what the measurement would be given our estimated attitude
     rB = B_Q_N*rN;
 
-    n = [cos.(ϵ).*cos.(α) cos.(ϵ).*sin.(α) sin.(ϵ)];
+    rs = B_Q_N * [1, 0, 0]; # For now, I am pretending that the sun vector is constant (i.e., satellite is rotating but stationary)
+    rs_hat = [0    -rs[3]   rs[2];   rs[3]   0    -rs[1];  -rs[2] rs[1]     0];
 
-    rB_3 = cross(rB[:,1], rB[:,2])   # This is a bit sketchy
-    rB_3 = [rB rB_3]'; 
+    n = [cos.(ϵ).*cos.(α) cos.(ϵ).*sin.(α) sin.(ϵ)];
      
     # dy/dθ
-    # rB_hat_1 = [0 -rB[3,1] rB[2,1]; rB[3,1] 0 -rB[1,1]; -rB[2,1] rB[1,1] 0];
-    # rB_hat_2 = [0 -rB[3,2] rB[2,2]; rB[3,2] 0 -rB[1,2]; -rB[2,2] rB[1,2] 0];
-    # dθ = [rB_hat_1; rB_hat_2];
+    rB_hat_1 = [0 -rB[3,1] rB[2,1]; rB[3,1] 0 -rB[1,1]; -rB[2,1] rB[1,1] 0];
+    rB_hat_2 = [0 -rB[3,2] rB[2,2]; rB[3,2] 0 -rB[1,2]; -rB[2,2] rB[1,2] 0];
     dθ = c .* n
-    dθ = dθ * rB_3;
+    dθ = dθ * rs_hat;  # THIS ISN'T RIGHT, BUT THE DIMENSIONS WORK FOR TESTING (should be sun vector)???
      
     # dy/dβ
-    dβ = zeros(1, 3);
+    dβ = zeros(numDiodes, 3);
 
     # dy/dc     
-    dc = n * rB_3
+    dc = n * rs; 
 
     # dy/dα 
     ndα = [-cos.(ϵ).*sin.(α) cos.(ϵ).*cos.(α) zeros(size(α))];
     dα = c .* ndα
-    dα = dα * rB_3 
+    dα = dα * rs;
 
     # dy/dϵ 
     ndϵ = [-sin.(ϵ).*cos.(α) sin.(ϵ).*sin.(α) cos.(ϵ)]; # NOT sure why the middle term isnt negative 
     dϵ = c .* ndϵ
-    dϵ = dϵ * rB_3
+    dϵ = dϵ * rs;
 
 
     
     # C = [rB_hat_1 zeros(3,3); 
     #      rB_hat_2 zeros(3,3)];
-    # C = [rB_hat_1 zeros(3,3) zeros(3,numDiodes) zeros(3, numDiodes); 
-    #      rB_hat_2 zeros(3,3) zeros(3,numDiodes) zeros(3, numDiodes)];
+    Cr = [rB_hat_1 zeros(3,3) zeros(3,3*numDiodes); # Jacobian for the vector measurement portion, [6, 6+3i]
+         rB_hat_2 zeros(3,3) zeros(3,3*numDiodes)];
 
-    C = [dθ; dβ; dc; dα; dϵ]
+    Ci = [dθ dβ Diagonal(dc) Diagonal(dα) Diagonal(dϵ)]  # Jacobian for current measurement portion, [i, 6+3i]
+    # C = [dθ dβ dc dα dϵ]  # Jacobian, [i, 9]
 
+    C = [Cr; Ci];
 
-    y = rB[:];
+    I_meas = c .* (n * rs) .+ 0; # Measured current, no albedo      
+
+    y = [rB[:]; I_meas[:]]; 
+
 
     return y, C
 
