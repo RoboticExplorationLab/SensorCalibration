@@ -51,6 +51,17 @@ vars = matread("TemplateCode/mekf_truth.mat")
 btrue = vars["btrue"]
 qtrue = vars["qtrue"]
 
+""" 
+euls = zeros(3,1501);
+for i = 1:1501
+    euls[:,i] = quat2eul(qtrue[:,i])
+end
+plt = plot( euls[1,:], label = "rho")
+plt = plot!(euls[2,:], label = "theta")
+plt = plot!(euls[3,:], label = "psi")
+display(plt)
+"""
+
 # qtrue is scalar last, so we need to rearrange it  ##########
 # temp = qtrue 
 # qtrue[1,:] = temp[4,:]
@@ -61,7 +72,6 @@ e = zeros(size(qtrue));
 for k = 1:size(qtrue,2)
     e[:,k] = qmult(qconj(qtrue[:,k]), xhist[1:4,k]); 
 end
-
 
 # ------ PLOTS ------ # 
 ### ATTITUDE 
