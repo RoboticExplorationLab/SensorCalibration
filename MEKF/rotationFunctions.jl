@@ -103,45 +103,45 @@ function qconj(q) ##############
 
 end
     
-function quat2eul(q)
-    if (size(q,1) != 4)
-        q = q';
-        transposeOutput = true;
-    else
-        transposeOutput = false;
-    end
+# function quat2eul(q)
+#     if (size(q,1) != 4)
+#         q = q';
+#         transposeOutput = true;
+#     else
+#         transposeOutput = false;
+#     end
     
-    # Normalize the quaternions
-    norm_q = sqrt(sum(q.^2));
-    q = q ./ norm_q;
+#     # Normalize the quaternions
+#     norm_q = sqrt(sum(q.^2));
+#     q = q ./ norm_q;
     
-    # invert if scalar is negative
-    # neg_idx = find(q[4] < 0);
-    if (q[4] < 0)
-        q[:] = -q[:];
-    end
+#     # invert if scalar is negative
+#     # neg_idx = find(q[4] < 0);
+#     if (q[4] < 0)
+#         q[:] = -q[:];
+#     end
     
-    # extract individual quaternion elements
-    qw = q[4];
-    qx = q[1];
-    qy = q[2];
-    qz = q[3];
+#     # extract individual quaternion elements
+#     qw = q[4];
+#     qx = q[1];
+#     qy = q[2];
+#     qz = q[3];
     
 
-    eul = [ atan( 2*(qx.*qy+qw.*qz), qw.^2 + qx.^2 - qy.^2 - qz.^2 ); 
-            asin( -2*(qx.*qz-qw.*qy) ); 
-            atan( 2*(qy.*qz+qw.*qx), qw.^2 - qx.^2 - qy.^2 + qz.^2 )];
+#     eul = [ atan( 2*(qx.*qy+qw.*qz), qw.^2 + qx.^2 - qy.^2 - qz.^2 ); 
+#             asin( -2*(qx.*qz-qw.*qy) ); 
+#             atan( 2*(qy.*qz+qw.*qx), qw.^2 - qx.^2 - qy.^2 + qz.^2 )];
             
 
     
-    # Check for complex numbers
-    if !isreal(eul)
-        eul = real(eul);
-    end
+#     # Check for complex numbers
+#     if !isreal(eul)
+#         eul = real(eul);
+#     end
     
-    if (transposeOutput)
-        eul = eul';
-    end
+#     if (transposeOutput)
+#         eul = eul';
+#     end
     
-    return eul;
-end
+#     return eul;
+# end

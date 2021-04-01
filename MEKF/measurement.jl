@@ -1,7 +1,4 @@
 function measurement(x, rN, numDiodes)
-    # (1) Get Sun Vector (Right now I just make one up) 
-
-
     # Generates the "measured" body vectors for a set of 
     #      newtonian (inertial) vectors using quaternion q
     #      (What our measurement would be given our estimated attitude)
@@ -28,16 +25,29 @@ function measurement(x, rN, numDiodes)
     # this is what the measurement would be given our estimated attitude
     rB = B_Q_N*rN;
 
-    rs = B_Q_N * [1, 0, 0]; # For now, I am pretending that the sun vector is constant (i.e., satellite is rotating but stationary)
-    rs_hat = [0    -rs[3]   rs[2];   rs[3]   0    -rs[1];  -rs[2] rs[1]     0];
+    rs = B_Q_N * rN[:,1]; # Assume that rN[:,1] is the sun vector %%%%%%%%%%%%%%
+    rs_hat = [0     -rs[3]   rs[2];   
+              rs[3]    0    -rs[1];  
+             -rs[2]  rs[1]     0];
 
     n = [cos.(ϵ).*cos.(α) cos.(ϵ).*sin.(α) sin.(ϵ)];
+
+    # theta = n[1,:]' * rs[:,1];
+    # theta = theta / (norm(n[1,:])*norm(rs[:,1]))
+    # theta = acos(theta) * 180 / pi
+
+    # if theta > 90
+    #     println("Error - greater than 90")
+    # elseif theta < 0
+    #     println("Error - theta < 0")
+    # end
+
      
-    # dy/dθ
+    # # dy/dθ
     rB_hat_1 = [0 -rB[3,1] rB[2,1]; rB[3,1] 0 -rB[1,1]; -rB[2,1] rB[1,1] 0];
     rB_hat_2 = [0 -rB[3,2] rB[2,2]; rB[3,2] 0 -rB[1,2]; -rB[2,2] rB[1,2] 0];
     dθ = c .* n
-    dθ = dθ * rs_hat;  # THIS ISN'T RIGHT, BUT THE DIMENSIONS WORK FOR TESTING (should be sun vector)???
+    dθ = dθ * rs_hat;  
      
     # dy/dβ
     dβ = zeros(numDiodes, 3);
@@ -46,15 +56,13 @@ function measurement(x, rN, numDiodes)
     dc = n * rs; 
 
     # dy/dα 
-    ndα = [-cos.(ϵ).*sin.(α) cos.(ϵ).*cos.(α) zeros(size(α))];
-    dα = c .* ndα
-    dα = dα * rs;
+    ndα = [(-cos.(ϵ).*sin.(α)) (cos.(ϵ).*cos.(α)) zeros(size(α))];
+    dα = c .* (ndα * rs);
 
     # dy/dϵ 
-    ndϵ = [-sin.(ϵ).*cos.(α) sin.(ϵ).*sin.(α) cos.(ϵ)]; # NOT sure why the middle term isnt negative 
-    dϵ = c .* ndϵ
-    dϵ = dϵ * rs;
-
+    ndϵ = [(-sin.(ϵ).*cos.(α)) (-sin.(ϵ).*sin.(α)) cos.(ϵ)]; # (With negative middle term)
+    # ndϵ = [(-sin.(ϵ).*cos.(α)) (sin.(ϵ).*sin.(α)) cos.(ϵ)]; # NOT sure why the middle term isnt negative 
+    dϵ = c .* (ndϵ * rs);
 
     
     # C = [rB_hat_1 zeros(3,3); 
@@ -63,7 +71,11 @@ function measurement(x, rN, numDiodes)
          rB_hat_2 zeros(3,3) zeros(3,3*numDiodes)];
 
     Ci = [dθ dβ Diagonal(dc) Diagonal(dα) Diagonal(dϵ)]  # Jacobian for current measurement portion, [i, 6+3i]
-    # C = [dθ dβ dc dα dϵ]  # Jacobian, [i, 9]
+    
+    
+    # Cr = [rB_hat_1 zeros(3,3) zeros(3,3); # Jacobian for the vector measurement portion, [6, 9]
+    #       rB_hat_2 zeros(3,3) zeros(3,3)];
+    # Ci = [dθ dβ dc dα dϵ]  # Jacobian, [i, 9]
 
     C = [Cr; Ci];
 
@@ -71,6 +83,7 @@ function measurement(x, rN, numDiodes)
 
     y = [rB[:]; I_meas[:]]; 
 
+    # y = rB[:];
 
     return y, C
 

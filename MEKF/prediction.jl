@@ -8,11 +8,10 @@ function prediction(xk,w,dt, numDiodes)
     theta = (norm(w - b)*dt);
     r = (w - b)/norm(w - b);
 
-    # qp = qmult(q, [cos(theta/2); r*sin(theta/2)]);  #################
     qp = qmult(q, [r*sin(theta/2); cos(theta/2)]); 
     
-    
     xn = [qp; b; c; α; ϵ]; # x at next step
+    # xn = [qp; b];
    
     alpha = (w - b);
     skew = -1*[0 -alpha[3] alpha[2]; alpha[3] 0 -alpha[1]; -alpha[2] alpha[1] 0];

@@ -1,6 +1,10 @@
 using Pkg
 using Plots
 using MAT, LinearAlgebra, ForwardDiff
+using JLD2
+using Random
+
+# Random.seed!(100)
 
 include("mekf.jl"); 
 include("measurement.jl")
@@ -8,70 +12,77 @@ include("prediction.jl")
 include("triad.jl")
 include("rotationFunctions.jl")
 
-i = 2
-α0 = 5 * randn(i, 1) * pi / 180 
-ϵ0 = 5 * randn(i, 1) * pi / 180 
-c0 = 5 * randn(i, 1) 
-wc, wα, wϵ = 1, 1, 1
 
-# load mekf_inputs
-vars = matread("TemplateCode/mekf_inputs.mat")
-rN1 = vars["rN1"][:,1]      # Pair of vectors in newtonian (inertial) frame (~noiseless?)
-rN2 = vars["rN2"][:,1]
-rB1hist = vars["rB1hist"]   # Sets of vectors in body frame (noisy)
-rB2hist = vars["rB2hist"]
-W = vars["W"]
-# WVals =  diag(W)
-# WVals = [WVals; ones(i,1)*wc; ones(i,1)*wα; ones(i,1)*wϵ]
-# W = Diagonal(WVals[:,1]) # Needs to be size [6 + 3i, 6 + 3i]
-W = W[1,1] .* I(6+3*i)
+@load "mekf_data.jld2"
 
-V = vars["V"]
-V = V[1,1] .* I(6+i) # 6 for getting rotation, i for current measurements
-whist = vars["whist"]
-dt = vars["dt"]             # Time step
+# # load mekf_inputs
+# vars = matread("TemplateCode/mekf_inputs.mat")
+# rN1 = vars["rN1"][:,1]      # Pair of vectors in newtonian (inertial) frame (~noiseless?)
+# rN2 = vars["rN2"][:,1]
+# rB1hist = vars["rB1hist"]   # Sets of vectors in body frame (noisy)
+# rB2hist = vars["rB2hist"]
+# W = vars["W"]
+# V = vars["V"]
+# whist = vars["whist"]       # Angular Velocity (?)
+# dt = vars["dt"]             # Time step
+
+# numDiodes = 3
+# Ihist = zeros(numDiodes, size(rB1hist,2))
+# cVals = zeros(3,1);
+# αs = zeros(3,1);
+# ϵs = zeros(3,1);
+
+
+i = numDiodes
+# α0 = pi * ones(i) / 4; # * randn(i, 1) 
+# ϵ0 = (pi/4) * ones(i); # * randn(i, 1)  
+# c0 = ones(i); #randn(i, 1) 
+
+α0 = αs + 0.1 *randn(i, 1)
+ϵ0 = ϵs + 0.1 *randn(i, 1)
+c0 = cVals + 0.1 * randn(i, 1)
+
+
+
+yhist = [rB1hist; rB2hist; Ihist]; # Measurements (bodyframe vectors)
+# yhist = [rB1hist; rB2hist];
 
 rN = hcat(rN1, rN2);
-yhist = [rB1hist; rB2hist]; # Measurements (bodyframe vectors)
+
+# # ADJUST THESE
+W = (3.04617e-10) .* I(6+3*i)
+V = (3.04617e-4) .* I(6+i) # 6 for getting rotation, i for current measurements
+
 
 # Initial quaternion estimate (scalar first)
 q0, R = triad(rN1,rN2,rB1hist[:,1],rB2hist[:,2]);
 β0 = [0;0;0];
 
 x0 = [q0; β0; c0; α0; ϵ0]; # Initialize with no bias, c=α=ϵ=rand, [7 x 3i]
+# x0 = [q0; β0];
 
-
-# Correct dimensions for P?
 P0 = (10*pi/180)^2 * I((size(x0, 1) - 1)); # 10 deg. and 10 deg/sec 1-sigma uncertainty + quaternions use an extra variable, so we subtract off
+#####
 
 xhist, Phist = mekf(x0,P0,W,V,rN,whist,yhist, dt, i);
 
-# load mekf_truth
-vars = matread("TemplateCode/mekf_truth.mat")
-btrue = vars["btrue"]
-qtrue = vars["qtrue"]
 
-""" 
-euls = zeros(3,1501);
-for i = 1:1501
-    euls[:,i] = quat2eul(qtrue[:,i])
-end
-plt = plot( euls[1,:], label = "rho")
-plt = plot!(euls[2,:], label = "theta")
-plt = plot!(euls[3,:], label = "psi")
-display(plt)
-"""
+@load "mekf_truth.jld2"
+# vars = matread("TemplateCode/mekf_truth.mat")
+# qtrue = vars["qtrue"]
+# btrue = vars["btrue"]
 
-# qtrue is scalar last, so we need to rearrange it  ##########
-# temp = qtrue 
-# qtrue[1,:] = temp[4,:]
-# qtrue[2:4,:] = temp[1:3,:]
 
 # Calculate error quaternions
 e = zeros(size(qtrue));
 for k = 1:size(qtrue,2)
     e[:,k] = qmult(qconj(qtrue[:,k]), xhist[1:4,k]); 
 end
+
+
+
+
+
 
 # ------ PLOTS ------ # 
 ### ATTITUDE 
@@ -91,15 +102,15 @@ display(plot(q0Plt, qiPlt, qjPlt, qkPlt, layout = (2,2), title = "Attitude"))
 
 ### Attitude Error 
 eiPlt = plot(  (360/pi) * e[1,:], label = "Ei")
-eiPlt = plot!( (360/pi) * sqrt.(Phist[1,1,:]), color = :red, label = "Variance bound?") # Should I squeeze Phist?
+eiPlt = plot!( (360/pi) * sqrt.(Phist[1,1,:]), color = :red, label = false) 
 eiPlt = plot!(-(360/pi) * sqrt.(Phist[1,1,:]), color = :red, label = false)
 
 ejPlt = plot(  (360/pi) * e[2,:], label = "Ej")
-ejPlt = plot!( (360/pi) * sqrt.(Phist[2,2,:]), color = :red, label = "Variance bound?") # Should I squeeze Phist?
+ejPlt = plot!( (360/pi) * sqrt.(Phist[2,2,:]), color = :red, label = false) 
 ejPlt = plot!(-(360/pi) * sqrt.(Phist[2,2,:]), color = :red, label = false)
 
 ekPlt = plot(  (360/pi) * e[3,:], label = "Ek")
-ekPlt = plot!( (360/pi) * sqrt.(Phist[3,3,:]), color = :red, label = "Variance bound?") # Should I squeeze Phist?
+ekPlt = plot!( (360/pi) * sqrt.(Phist[3,3,:]), color = :red, label = false) 
 ekPlt = plot!(-(360/pi) * sqrt.(Phist[3,3,:]), color = :red, label = false)
 
 display(plot(eiPlt, ejPlt, ekPlt, layout = (3,1), title = "Attitude Error (deg)"))
@@ -107,15 +118,44 @@ display(plot(eiPlt, ejPlt, ekPlt, layout = (3,1), title = "Attitude Error (deg)"
 
 ### Bias Error
 bxPlt = plot(  xhist[5,:] - btrue[1,:], label = "Bx")
-bxPlt = plot!( 2*sqrt.(Phist[4,4,:]), color = :red, label = "Variance?")
+bxPlt = plot!( 2*sqrt.(Phist[4,4,:]), color = :red, label = false)
 bxPlt = plot!(-2*sqrt.(Phist[4,4,:]), color = :red, label = false)
 
 byPlt = plot(  xhist[6,:] - btrue[2,:], label = "By")
-byPlt = plot!( 2*sqrt.(Phist[5,5,:]), color = :red, label = "Variance?")
+byPlt = plot!( 2*sqrt.(Phist[5,5,:]), color = :red, label = false)
 byPlt = plot!(-2*sqrt.(Phist[5,5,:]), color = :red, label = false)
 
-bzPlt = plot(  xhist[7,:] - btrue[3,:], label = "By")
-bzPlt = plot!( 2*sqrt.(Phist[6,6,:]), color = :red, label = "Variance?")
+bzPlt = plot(  xhist[7,:] - btrue[3,:], label = "Bz")
+bzPlt = plot!( 2*sqrt.(Phist[6,6,:]), color = :red, label = false)
 bzPlt = plot!(-2*sqrt.(Phist[6,6,:]), color = :red, label = false)
 
 display(plot(bxPlt, byPlt, bzPlt, layout = (3,1), title = "Bias Error"))
+
+
+### Calibration Estimates
+cPlt1 = plot( xhist[8,:], color = "red", label = "1")
+cPlt1 = hline!([cVals[1]], color = "red", label = false, linestyle = :dash)
+cPlt2 = plot(xhist[9,:], color = "blue", label = "2")
+cPlt2 = hline!([cVals[2]], color = "blue", label = false, linestyle = :dash)
+cPlt3 = plot(xhist[10,:], color = "green", label = "3")
+cPlt3 = hline!([cVals[3]], color = "green", label = false, linestyle = :dash)
+display(plot(cPlt1, cPlt2, cPlt3, layout = (3,1), title = "Calibration values"))
+
+aPlt1 = plot( xhist[11,:], color = "red", label = "1")
+aPlt1 = hline!([αs[1]], color = "red", label = false, linestyle = :dash)
+aPlt2 = plot(xhist[12,:], color = "blue", label = "2")
+aPlt2 = hline!([αs[2]], color = "blue", label = false, linestyle = :dash)
+aPlt3 = plot(xhist[13,:], color = "green", label = "3")
+aPlt3 = hline!([αs[3]], color = "green", label = false, linestyle = :dash)
+display(plot(aPlt1, aPlt2, aPlt3, layout = (3,1), title = "Azimuth Angles (α)"))
+
+ePlt1 = plot( xhist[14,:], color = "red", label = "1")
+ePlt1 = hline!([ϵs[1]], color = "red", label = false, linestyle = :dash)
+ePlt2 = plot(xhist[15,:], color = "blue", label = "2")
+ePlt2 = hline!([ϵs[2]], color = "blue", label = false, linestyle = :dash)
+ePlt3 = plot(xhist[16,:], color = "green", label = "3")
+ePlt3 = hline!([ϵs[3]], color = "green", label = false, linestyle = :dash)
+display(plot(ePlt1, ePlt2, ePlt3, layout = (3,1), title = "Elevation Angles (ϵ)"))
+
+
+# display(plot(cPlt, aPlt, ePlt, layout = (3,1), title = "Calibration Estimates"))
