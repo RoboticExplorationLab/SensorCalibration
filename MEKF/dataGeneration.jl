@@ -2,6 +2,9 @@ using DifferentialEquations
 using LinearAlgebra
 using Plots
 using JLD2
+using Random, Distributions
+
+Random.seed!(10341)
 
 
 dscale = 1e6
@@ -14,24 +17,27 @@ _r0 = (550000 / dscale) + _Re # Distance from two center of masses
 _a = _r0 # Semi-major axis of (elliptical) orbit (circular orbit if a = r0)
 _v0 = sqrt(_mu*( (2/_r0) - (1/_a))) 
 
-r = [sqrt(1/2); sqrt(1/2); sqrt(1/2)]; θ = pi/4;
+r = [1; 1; 1/2]; r = r / norm(r);
+θ = pi/4;
 q0 =  [r * sin(θ/2); cos(θ/2)];
 
 p0 = [_r0, 0, 0];
 v0 = [0, _v0, 0];
-w0 = [0.3, 0.5, 0.02]
+# w0 = [0.3, 0.5, 0.02];
+# w0 = w0 / norm(w0);
+w0 = [0.0001, 0.0002, 0.0003] * tscale;
 
-β0 = w0 * 0.001;
+β0 = w0 * 0.1;
 
-x0 = [p0; v0; q0; w0];# β0];
+x0 = [p0; v0; q0; w0];
 param = [_mu, _Re, _r0]; # Parameters
 
 
 # Simulator Parameters
 orbitTime = ((2*pi*_r0)/(_v0));
 day = 24.0 * 60 * 60 / tscale;
-tspan = (0, 3 * orbitTime) 
-saveRate = 1 / tscale;# orbitTime/1000;      # May need a higher save rate...
+tspan = (0, 2 * orbitTime) 
+saveRate = 1 / tscale;    # May need a higher save rate...
 
 
 # State Propagation
@@ -66,15 +72,12 @@ function dynamics(xdot, x, p, t)
     q = x[7:10]
 
     w = x[11:13]
-    # β = x[14:16] + 0.001 * randn(3)
-    # w = w + β;
 
     xdot[7:10] = 0.5 * qmult(q, [w; 0])
 
-    J = [1 0 0; 0 2 0; 0 0 3];   # PLACEHOLDER
+    J = [1 0 0; 0 2 0; 0 0 3];   # # # # # # # PLACEHOLDER
     xdot[11:13] = ((J^(-1))) * cross(-w, (J*w));
 
-    # xdot[14:16] = β
 end
 
 
@@ -82,23 +85,23 @@ end
 prob = ODEProblem(dynamics, x0, tspan, param);
 sol = solve(prob, Vern7(), reltol = 1e-8, saveat = saveRate);
 
-pos = plot( sol[1,:], label = "x")
-pos = plot!(sol[2,:], label = "y")
-pos = plot!(sol[3,:], label = "z")
-display(plot(pos, title = "Position"))
+# pos = plot( sol[1,:], label = "x")
+# pos = plot!(sol[2,:], label = "y")
+# pos = plot!(sol[3,:], label = "z")
+# display(plot(pos, title = "Position"))
 
 
-quat = plot( sol[7,:], label = "i")
-quat = plot!(sol[8,:], label = "j")
-quat = plot!(sol[9,:], label = "k")
-quat = plot!(sol[10,:], label = "Scalar")
-display(plot(quat, title = "Quaternions"))
+# quat = plot( sol[7,:], label = "i")
+# quat = plot!(sol[8,:], label = "j")
+# quat = plot!(sol[9,:], label = "k")
+# quat = plot!(sol[10,:], label = "Scalar")
+# display(plot(quat, title = "Quaternions"))
 
 
-ang = plot( sol[11,:], label = "wx")
-ang = plot!(sol[12,:], label = "wy")
-ang = plot!(sol[13,:], label = "wz")
-display(plot(ang, title = "Angle"))
+# ang = plot( sol[11,:], label = "wx")
+# ang = plot!(sol[12,:], label = "wy")
+# ang = plot!(sol[13,:], label = "wz")
+# display(plot(ang, title = "Angle"))
 
 
 
@@ -135,8 +138,7 @@ function g(x)
 
     qVec = q[1:3];
     qSca = q[4];
-    R = I(3) + 2 * hat(qVec) * (qSca * I(3) + hat(qVec)); # R N->B   ##### Is this R B-> N or N->B?
-    # R = quat2rot(q);
+    R = I(3) + 2 * hat(qVec) * (qSca * I(3) + hat(qVec)); # R N->B   
     R = transpose(R); # R B->N
 
     sB = R * sN + 0.005 * randn(3);
@@ -158,6 +160,7 @@ function g(x)
     
 end
 
+
 numDiodes = 3;
 cVals = 1 .+ 0.25 * randn(numDiodes);
 
@@ -168,25 +171,26 @@ idxs = (ϵs .> (pi/2));
 idxs = (ϵs .< 0);
 ϵs[idxs] .= 0
 
+
 # Azimuth ∈ [0, 2π)
-αs = (pi) .+ 0.5 * randn(numDiodes);
+αs = (pi/2) .+ 0.5 * randn(numDiodes);
 idxs = (αs .>= (2*pi));
 αs[idxs] .= (2*pi);
 idxs = (αs .< 0);
 αs[idxs] .= 0
 
+
 yhist = zeros((6 + numDiodes), size(states,2))
 
 
-
-sN = [1; 0; 0];     # ARBITRARILY CHOSEN FOR NOW
-sN = [0.6692628932588212;
+sN = [0.6692628932588212;  # ARBITRARILY CHOSEN FOR NOW
         -0.681848889145605;
         0.2952444276827865];
-bN = [0; 1; 0];
+
 bN = [  0.26270092455049937;
         -0.7082385474829961;
         -0.6552758076562027];
+
 
 
 
@@ -195,11 +199,14 @@ for i = 1:size(states,2)
     yhist[:,i] = g(states[:,i])
 end
 
+b1 = rand(Normal(β0[1], 0.1 * β0[1]), size(yhist,2))'
+b2 = rand(Normal(β0[2], 0.1 * β0[2]), size(yhist,2))'
+b3 = rand(Normal(β0[3], 0.1 * β0[3]), size(yhist,2))'
 
-biases = [0.0003; 0.0005; 0.00005] .+ 0.000*randn(3, size(yhist,2))
-whist = states[11:13,:] + biases;  # Not sure if i added bias in correctly. Should I just do it here...?
-# biases = states[14:16,:]
-
+biases = [b1; b2; b3];
+println("Size: ", size(biases))
+whist = (states[11:13,:]+ biases)/tscale   # Not sure if i added bias in correctly. Should I just do it here...?
+biases = biases / tscale
 dt = saveRate * tscale;
 
 rB1hist = yhist[1:3,:]

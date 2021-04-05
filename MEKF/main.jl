@@ -2,9 +2,9 @@ using Pkg
 using Plots
 using MAT, LinearAlgebra, ForwardDiff
 using JLD2
-using Random
+using Random, Distributions
 
-# Random.seed!(100)
+Random.seed!(1001)
 
 include("mekf.jl"); 
 include("measurement.jl")
@@ -34,14 +34,17 @@ include("rotationFunctions.jl")
 
 
 i = numDiodes
-# α0 = pi * ones(i) / 4; # * randn(i, 1) 
-# ϵ0 = (pi/4) * ones(i); # * randn(i, 1)  
-# c0 = ones(i); #randn(i, 1) 
 
-α0 = αs + 0.1 *randn(i, 1)
-ϵ0 = ϵs + 0.1 *randn(i, 1)
-c0 = cVals + 0.1 * randn(i, 1)
+μ_α = sum(αs) / i;
+μ_ϵ = sum(ϵs) / i;
+μ_c = sum(cVals) / i;
+σ_α = deg2rad(5); # 5 degrees
+σ_ϵ = deg2rad(5);
+σ_c = 0.1 * μ_c;
 
+α0 = rand(Normal(μ_α, σ_α), i)
+ϵ0 = rand(Normal(μ_ϵ, σ_ϵ), i)
+c0 = rand(Normal(μ_c, σ_c), i)
 
 
 yhist = [rB1hist; rB2hist; Ihist]; # Measurements (bodyframe vectors)
@@ -49,9 +52,11 @@ yhist = [rB1hist; rB2hist; Ihist]; # Measurements (bodyframe vectors)
 
 rN = hcat(rN1, rN2);
 
-# # ADJUST THESE
+# # ADJUST THESE ##########
+# W = (3.04617e-10) .* I(6)
+# V = (3.04617e-4)  .* I(6) # 6 for getting rotation, i for current measurements
 W = (3.04617e-10) .* I(6+3*i)
-V = (3.04617e-4) .* I(6+i) # 6 for getting rotation, i for current measurements
+V = (3.04617e-4)  .* I(6+i) # 6 for getting rotation, i for current measurements
 
 
 # Initial quaternion estimate (scalar first)
@@ -132,28 +137,32 @@ bzPlt = plot!(-2*sqrt.(Phist[6,6,:]), color = :red, label = false)
 display(plot(bxPlt, byPlt, bzPlt, layout = (3,1), title = "Bias Error"))
 
 
+xhist[(8+i):end,:] = rad2deg.(xhist[(8+i):end,:]);
+αs = rad2deg.(αs)
+ϵs = rad2deg.(ϵs)
+
 ### Calibration Estimates
-cPlt1 = plot( xhist[8,:], color = "red", label = "1")
+cPlt1 = plot( xhist[8,:], color = "red", label = false)
 cPlt1 = hline!([cVals[1]], color = "red", label = false, linestyle = :dash)
-cPlt2 = plot(xhist[9,:], color = "blue", label = "2")
+cPlt2 = plot(xhist[9,:], color = "blue", label = false)
 cPlt2 = hline!([cVals[2]], color = "blue", label = false, linestyle = :dash)
-cPlt3 = plot(xhist[10,:], color = "green", label = "3")
+cPlt3 = plot(xhist[10,:], color = "green", label = false)
 cPlt3 = hline!([cVals[3]], color = "green", label = false, linestyle = :dash)
 display(plot(cPlt1, cPlt2, cPlt3, layout = (3,1), title = "Calibration values"))
 
-aPlt1 = plot( xhist[11,:], color = "red", label = "1")
+aPlt1 = plot( xhist[8+i,:], color = "red", label = false)
 aPlt1 = hline!([αs[1]], color = "red", label = false, linestyle = :dash)
-aPlt2 = plot(xhist[12,:], color = "blue", label = "2")
+aPlt2 = plot(xhist[9+i,:], color = "blue", label = false)
 aPlt2 = hline!([αs[2]], color = "blue", label = false, linestyle = :dash)
-aPlt3 = plot(xhist[13,:], color = "green", label = "3")
+aPlt3 = plot(xhist[10+i,:], color = "green", label = false)
 aPlt3 = hline!([αs[3]], color = "green", label = false, linestyle = :dash)
 display(plot(aPlt1, aPlt2, aPlt3, layout = (3,1), title = "Azimuth Angles (α)"))
 
-ePlt1 = plot( xhist[14,:], color = "red", label = "1")
+ePlt1 = plot( xhist[8+2*i,:], color = "red", label = false)
 ePlt1 = hline!([ϵs[1]], color = "red", label = false, linestyle = :dash)
-ePlt2 = plot(xhist[15,:], color = "blue", label = "2")
+ePlt2 = plot(xhist[9+2*i,:], color = "blue", label = false)
 ePlt2 = hline!([ϵs[2]], color = "blue", label = false, linestyle = :dash)
-ePlt3 = plot(xhist[16,:], color = "green", label = "3")
+ePlt3 = plot(xhist[10+2*i,:], color = "green", label = false)
 ePlt3 = hline!([ϵs[3]], color = "green", label = false, linestyle = :dash)
 display(plot(ePlt1, ePlt2, ePlt3, layout = (3,1), title = "Elevation Angles (ϵ)"))
 

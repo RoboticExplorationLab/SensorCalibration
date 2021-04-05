@@ -1,5 +1,5 @@
 function q_from_DCM(R)
-    # Converts a scalar-first quaternion to a DCM matrix (From Kevin)
+    # Converts a DCM matrix into a scalar-last quaternion (From Kevin)
 
     T = R[1,1] + R[2,2] + R[3,3];
     if (T > R[1,1]) && (T > R[2,2]) && (T>R[3,3])
@@ -27,8 +27,8 @@ function q_from_DCM(R)
         q1 = (R[1,3] + R[3,1])*r;
         q2 = (R[2,3] + R[3,2])*r;
     end
-    q = [q1;q2;q3;q4];     # Scalar last ##########################
-    # q = [q4;q1;q2;q3];     # Scalar first
+    q = [q1;q2;q3;q4];     
+
     if q4<0
        q = -q;
     end
@@ -36,22 +36,20 @@ function q_from_DCM(R)
     return q
 end
 
+##### DO I NEED TO NORMALIZE ANYTHING HERE?
 function dcm_from_q(quat)
-    # Takes in a quaternion (scalar first - [q, q⃗]) and returns the DCM  (From Kevin)
+    # Takes in a quaternion (scalar last - [q⃗, q]) and returns the DCM  (From Kevin)
     
     quat = quat[:];
     
-    # v = quat[2:4];                    #############
-    # s = quat[1];
     v = quat[1:3];
     s = quat[4];
     
-    DCM = I(3) +2*hat(v)*(s*I(3) + hat(v));
+    DCM = I(3) + 2*hat(v)*(s*I(3) + hat(v));
 
     return DCM;
-    
 end
-
+    
 function hat(v)
     # Forms a skew symmetric matrix from a vector 
 
@@ -65,19 +63,11 @@ end
 
 function qmult(q, p)
     # Performs quaternion multiplication (Hamilton product) 
-    #   (Quaternions are scalar first)
+    #   (Quaternions are scalar last)
 
     q = q[:]
     p = p[:]
 
-    # q0, p0 = q[1], p[1]           ##############33
-    # q⃗ = q[2:4]
-    # p⃗ = p[2:4]
-
-    # r0 = q0 * p0 - dot(q⃗, p⃗)
-    # r⃗ = (q0 * p⃗) + (p0 * q⃗) + cross(q⃗, p⃗)
-
-    # r = [r0; r⃗]
     
     q0, p0 = q[4], p[4]
     q⃗ = q[1:3]
@@ -90,58 +80,10 @@ function qmult(q, p)
     return r
 end
 
-function qconj(q) ##############
-    # Returns the quaternion conjugate (scalar first)
-    # q0 = q[1]
-    # q⃗ = q[2:4]
-
-    # return [q0; -q⃗]
-
+function qconj(q) 
+    # Returns the quaternion conjugate (scalar last)
     q0 = q[4]
     q⃗ = q[1:3]
     return [-q⃗; q0]
-
 end
-    
-# function quat2eul(q)
-#     if (size(q,1) != 4)
-#         q = q';
-#         transposeOutput = true;
-#     else
-#         transposeOutput = false;
-#     end
-    
-#     # Normalize the quaternions
-#     norm_q = sqrt(sum(q.^2));
-#     q = q ./ norm_q;
-    
-#     # invert if scalar is negative
-#     # neg_idx = find(q[4] < 0);
-#     if (q[4] < 0)
-#         q[:] = -q[:];
-#     end
-    
-#     # extract individual quaternion elements
-#     qw = q[4];
-#     qx = q[1];
-#     qy = q[2];
-#     qz = q[3];
-    
-
-#     eul = [ atan( 2*(qx.*qy+qw.*qz), qw.^2 + qx.^2 - qy.^2 - qz.^2 ); 
-#             asin( -2*(qx.*qz-qw.*qy) ); 
-#             atan( 2*(qy.*qz+qw.*qx), qw.^2 - qx.^2 - qy.^2 + qz.^2 )];
-            
-
-    
-#     # Check for complex numbers
-#     if !isreal(eul)
-#         eul = real(eul);
-#     end
-    
-#     if (transposeOutput)
-#         eul = eul';
-#     end
-    
-#     return eul;
-# end
+   
