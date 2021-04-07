@@ -4,14 +4,13 @@ using MAT, LinearAlgebra, ForwardDiff
 using JLD2
 using Random, Distributions
 
-Random.seed!(1001)
+# Random.seed!(62324)
 
 include("mekf.jl"); 
 include("measurement.jl")
 include("prediction.jl")
 include("triad.jl")
 include("rotationFunctions.jl")
-
 
 @load "mekf_data.jld2"
 
@@ -50,7 +49,8 @@ c0 = rand(Normal(μ_c, σ_c), i)
 yhist = [rB1hist; rB2hist; Ihist]; # Measurements (bodyframe vectors)
 # yhist = [rB1hist; rB2hist];
 
-rN = hcat(rN1, rN2);
+# rN = hcat(rN1, rN2); ############################
+rN = [rN1; rN2];
 
 # # ADJUST THESE ##########
 # W = (3.04617e-10) .* I(6)
@@ -60,7 +60,7 @@ V = (3.04617e-4)  .* I(6+i) # 6 for getting rotation, i for current measurements
 
 
 # Initial quaternion estimate (scalar first)
-q0, R = triad(rN1,rN2,rB1hist[:,1],rB2hist[:,2]);
+q0, R = triad(rN1[:,1],rN2[:,1],rB1hist[:,1],rB2hist[:,2]);
 β0 = [0;0;0];
 
 x0 = [q0; β0; c0; α0; ϵ0]; # Initialize with no bias, c=α=ϵ=rand, [7 x 3i]
