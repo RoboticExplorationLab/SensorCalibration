@@ -13,8 +13,8 @@ include("mag_field.jl")
 
 # Random.seed!(2534)
 
-dscale = 1e6
-tscale = 3600/5
+dscale = 1#1e6
+tscale = 1#3600/5
 
 # Constants
 _Re = 6378136.3 / dscale            # Radius of the earth 
@@ -31,9 +31,8 @@ q0 =  [r * sin(θ/2); cos(θ/2)];
 # Initial position, velocity, and angular velocity 
 p0 = [_r0, 0, 0];
 v0 = [0, _v0, 0];
-w0 = [0.0001, 0.0002, 0.0003] * tscale;
-
-β0 = w0 * 0.1;
+# w0 = [0.0001, 0.0002, 0.0003] * tscale;
+w0 = [0.0002, 0.0004, 0.0006] * tscale;
 
 x0 = [p0; v0; q0; w0];
 param = [_mu, _Re, _r0]; # Parameters
@@ -42,8 +41,9 @@ param = [_mu, _Re, _r0]; # Parameters
 # Simulator Parameters
 orbitTime = ((2*pi*_r0)/(_v0));
 day = 24.0 * 60 * 60 / tscale;
-tspan = (0, 4 * orbitTime) 
-saveRate = 1 / tscale;    # May need a higher save rate...
+tspan = (0, 3 * orbitTime) 
+# tspan = (0, 60*150 / tscale)
+saveRate = 1 / tscale;    
 
 
 # State Propagation
@@ -163,7 +163,7 @@ function g(x, t) # Epc has already been added to t
 
         n = [cos(ϵs[i])*cos(αs[i]) cos(ϵs[i])*sin(αs[i]) sin(ϵs[i])]
 
-        Ii = cVals[i] * n * sB .+ 0 .+ 0; # η = 0, no albedo yet
+        Ii = cVals[i] * n * sB .+ 0 .+ 0.01*randn(1); # ση = 0.1, no albedo yet
 
         Is[i] = Ii[1]
     end
@@ -174,10 +174,10 @@ function g(x, t) # Epc has already been added to t
 end
 
 
-numDiodes = 3;
+numDiodes = 5;
 cVals = 1 .+ 0.2 * randn(numDiodes);
 
-ϵs = (pi/4) .+ 0.1 * randn(numDiodes);
+ϵs = (pi/4) .+ 0.2 * randn(numDiodes);
 #   Elevation ∈ [0, π/2]
 idxs = (ϵs .> (pi/2));
 ϵs[idxs] .= (pi/2);
@@ -186,7 +186,7 @@ idxs = (ϵs .< 0);
 
 
 # Azimuth ∈ [0, 2π)
-αs = (pi/2) .+ 0.2 * randn(numDiodes);
+αs = (pi/2) .+ 0.3 * randn(numDiodes);
 idxs = (αs .>= (2*pi));
 αs[idxs] .= (2*pi - 0.1);
 idxs = (αs .< 0);
@@ -224,6 +224,7 @@ for i = 1:size(states,2)
 end
 
 
+β0 = w0 * 0.1;
 b1 = rand(Normal(β0[1], 0.1 * β0[1]), size(yhist,2))'
 b2 = rand(Normal(β0[2], 0.1 * β0[2]), size(yhist,2))'
 b3 = rand(Normal(β0[3], 0.1 * β0[3]), size(yhist,2))'

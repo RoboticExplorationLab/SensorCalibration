@@ -37,8 +37,8 @@ i = numDiodes
 μ_α = sum(αs) / i;
 μ_ϵ = sum(ϵs) / i;
 μ_c = sum(cVals) / i;
-σ_α = deg2rad(5); # 5 degrees
-σ_ϵ = deg2rad(5);
+σ_α = deg2rad(7); # 5 degrees
+σ_ϵ = deg2rad(7);
 σ_c = 0.1 * μ_c;
 
 α0 = rand(Normal(μ_α, σ_α), i)
