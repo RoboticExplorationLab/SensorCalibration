@@ -4,7 +4,7 @@ using MAT, LinearAlgebra, ForwardDiff
 using JLD2
 using Random, Distributions
 
-# Random.seed!(62324)
+# Random.seed!(62386)
 
 include("mekf.jl"); 
 include("measurement.jl")
@@ -14,47 +14,22 @@ include("rotationFunctions.jl")
 
 @load "mekf_data.jld2"
 
-# # load mekf_inputs
-# vars = matread("TemplateCode/mekf_inputs.mat")
-# rN1 = vars["rN1"][:,1]      # Pair of vectors in newtonian (inertial) frame (~noiseless?)
-# rN2 = vars["rN2"][:,1]
-# rB1hist = vars["rB1hist"]   # Sets of vectors in body frame (noisy)
-# rB2hist = vars["rB2hist"]
-# W = vars["W"]
-# V = vars["V"]
-# whist = vars["whist"]       # Angular Velocity (?)
-# dt = vars["dt"]             # Time step
-
-# numDiodes = 3
-# Ihist = zeros(numDiodes, size(rB1hist,2))
-# cVals = zeros(3,1);
-# αs = zeros(3,1);
-# ϵs = zeros(3,1);
-
-
 i = numDiodes
-
-μ_α = sum(αs) / i;
-μ_ϵ = sum(ϵs) / i;
 μ_c = sum(cVals) / i;
-σ_α = deg2rad(7); # 5 degrees
-σ_ϵ = deg2rad(7);
+σ_α = deg2rad(5); # 5 degrees
+σ_ϵ = deg2rad(5);
 σ_c = 0.1 * μ_c;
 
-α0 = rand(Normal(μ_α, σ_α), i)
-ϵ0 = rand(Normal(μ_ϵ, σ_ϵ), i)
-c0 = rand(Normal(μ_c, σ_c), i)
+α0 = αs .+ rand(Normal(0.0, σ_α), i)
+ϵ0 = ϵs .+ rand(Normal(0.0, σ_ϵ), i)
+c0 = cVals .+ rand(Normal(0.0, σ_c), i)
 
 
 yhist = [rB1hist; rB2hist; Ihist]; # Measurements (bodyframe vectors)
-# yhist = [rB1hist; rB2hist];
 
-# rN = hcat(rN1, rN2); ############################
 rN = [rN1; rN2];
 
 # # ADJUST THESE ##########
-# W = (3.04617e-10) .* I(6)
-# V = (3.04617e-4)  .* I(6) # 6 for getting rotation, i for current measurements
 W = (3.04617e-10) .* I(6+3*i)
 V = (3.04617e-4)  .* I(6+i) # 6 for getting rotation, i for current measurements
 
@@ -66,16 +41,17 @@ q0, R = triad(rN1[:,1],rN2[:,1],rB1hist[:,1],rB2hist[:,2]);
 x0 = [q0; β0; c0; α0; ϵ0]; # Initialize with no bias, c=α=ϵ=rand, [7 x 3i]
 # x0 = [q0; β0];
 
+# 10 deg, 10 deg/sec, and σ_c, σ_α, σ_ϵ 1-sigma uncertainty 
+# σ_q = (10*pi/180)
+# σ_β = (10*pi/180)
+# p = [σ_q * ones(3); σ_β * ones(3); σ_c * ones(i); σ_α*ones(i); σ_ϵ*ones(i)].^2
+# P0 = diagm(p)
 P0 = (10*pi/180)^2 * I((size(x0, 1) - 1)); # 10 deg. and 10 deg/sec 1-sigma uncertainty + quaternions use an extra variable, so we subtract off
-#####
 
-xhist, Phist = mekf(x0,P0,W,V,rN,whist,yhist, dt, i);
+xhist, Phist = mekf(x0,P0,W,V,rN,whist,yhist, dt, i, eclipse);
 
 
-@load "mekf_truth.jld2"
-# vars = matread("TemplateCode/mekf_truth.mat")
-# qtrue = vars["qtrue"]
-# btrue = vars["btrue"]
+@load "mekf_truth.jld2" # qtrue, btrue
 
 
 # Calculate error quaternions
@@ -142,13 +118,27 @@ xhist[(8+i):end,:] = rad2deg.(xhist[(8+i):end,:]);
 ϵs = rad2deg.(ϵs)
 
 ### Calibration Estimates
-cPlt1 = plot( xhist[8,:], color = "red", label = false)
-cPlt1 = hline!([cVals[1]], color = "red", label = false, linestyle = :dash)
-cPlt2 = plot(xhist[9,:], color = "blue", label = false)
-cPlt2 = hline!([cVals[2]], color = "blue", label = false, linestyle = :dash)
-cPlt3 = plot(xhist[10,:], color = "green", label = false)
-cPlt3 = hline!([cVals[3]], color = "green", label = false, linestyle = :dash)
+cPlt1 = plot( xhist[8,:] .- cVals[1], color = :blue, label = false)
+cPlt1 = plot!( 2*sqrt.(Phist[7,7,:]), color = :red, label = false)
+cPlt1 = plot!(-2*sqrt.(Phist[7,7,:]), color = :red, label = false)
+
+cPlt2 = plot( xhist[9,:] .- cVals[2], color = :blue, label = false)
+cPlt2 = plot!( 2*sqrt.(Phist[8,8,:]), color = :red, label = false)
+cPlt2 = plot!(-2*sqrt.(Phist[8,8,:]), color = :red, label = false)
+
+cPlt3 = plot( xhist[10,:] .- cVals[3], color = :blue, label = false)
+cPlt3 = plot!( 2*sqrt.(Phist[9,9,:]), color = :red, label = false)
+cPlt3 = plot!(-2*sqrt.(Phist[9,9,:]), color = :red, label = false)
+
+# cPlt1 = plot( xhist[8,:], color = "red", label = false)
+# cPlt1 = hline!([cVals[1]], color = "red", label = false, linestyle = :dash)
+# cPlt2 = plot(xhist[9,:], color = "blue", label = false)
+# cPlt2 = hline!([cVals[2]], color = "blue", label = false, linestyle = :dash)
+# cPlt3 = plot(xhist[10,:], color = "green", label = false)
+# cPlt3 = hline!([cVals[3]], color = "green", label = false, linestyle = :dash)
 display(plot(cPlt1, cPlt2, cPlt3, layout = (3,1), title = "Calibration values"))
+
+
 
 aPlt1 = plot( xhist[8+i,:], color = "red", label = false)
 aPlt1 = hline!([αs[1]], color = "red", label = false, linestyle = :dash)

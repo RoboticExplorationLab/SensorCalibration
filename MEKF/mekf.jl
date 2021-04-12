@@ -1,4 +1,4 @@
-function mekf(x0, P0, W, V, rN, whist, yhist, dt, numDiodes)
+function mekf(x0, P0, W, V, rN, whist, yhist, dt, numDiodes, eclipse)
 
     xhist = zeros(size(x0,1),size(yhist,2)); # x = [q beta c α ϵ] = [q0 qi qj qk bx by bz ci αi ϵi ] x [N]
     xhist[:,1] = x0;
@@ -15,7 +15,7 @@ function mekf(x0, P0, W, V, rN, whist, yhist, dt, numDiodes)
         
         rNVecs = [rN[1:3,k] rN[4:6,k]]; #######################
         # rNVecs = [rN[1:3] rN[4:6]] ##############################
-        yp, C = measurement(x_p, rNVecs, numDiodes);   # Gives us what we would expect to get out of yhist given our predicted x
+        yp, C = measurement(x_p, rNVecs, numDiodes, eclipse[k]);   # Gives us what we would expect to get out of yhist given our predicted x
         
         # Innovation
         z = yhist[:,k] - yp[:];

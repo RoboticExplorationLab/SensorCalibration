@@ -10,41 +10,7 @@ using Random, Distributions
 using Attitude, SatelliteDynamics
 using JLD2
 include("mag_field.jl")
-
-# Random.seed!(2534)
-
-dscale = 1#1e6
-tscale = 1#3600/5
-
-# Constants
-_Re = 6378136.3 / dscale            # Radius of the earth 
-_mu = (tscale^2)*(3.9860044188)*(10^(14)) / (dscale ^ 3);  # (m^3/s^2) Standard Gravitational Parameter
-_r0 = (550000 / dscale) + _Re       # Distance from two center of masses
-_a = _r0                            # Semi-major axis of (elliptical) orbit (circular orbit if a = r0)
-_v0 = sqrt(_mu*( (2/_r0) - (1/_a))) 
-
-# Initial Quaternion
-r = [1; 1; 1/2]; r = r / norm(r);
-θ = pi/4;
-q0 =  [r * sin(θ/2); cos(θ/2)];
-
-# Initial position, velocity, and angular velocity 
-p0 = [_r0, 0, 0];
-v0 = [0, _v0, 0];
-# w0 = [0.0001, 0.0002, 0.0003] * tscale;
-w0 = [0.0002, 0.0004, 0.0006] * tscale;
-
-x0 = [p0; v0; q0; w0];
-param = [_mu, _Re, _r0]; # Parameters
-
-
-# Simulator Parameters
-orbitTime = ((2*pi*_r0)/(_v0));
-day = 24.0 * 60 * 60 / tscale;
-tspan = (0, 3 * orbitTime) 
-# tspan = (0, 60*150 / tscale)
-saveRate = 1 / tscale;    
-
+include("TestingParameters/Test2a_NoNeg.jl")
 
 # State Propagation
 function qmult(q, p)
@@ -81,7 +47,6 @@ function dynamics(xdot, x, p, t)
 
     xdot[7:10] = 0.5 * qmult(q, [w; 0])
 
-    J = [1 0 0; 0 2 0; 0 0 3];   # # # # # # # PLACEHOLDER
     xdot[11:13] = ((J^(-1))) * cross(-w, (J*w));
 
 end
@@ -89,8 +54,7 @@ end
 
 prob = ODEProblem(dynamics, x0, tspan, param);
 sol = solve(prob, Vern7(), reltol = 1e-8, saveat = saveRate);
-
-epc = Epoch(2019, 1, 1, 12, 0, 0, 0.0) # initial time for sim
+states = sol[:,:];
 
 pos = plot( sol[1,:], label = "x")
 pos = plot!(sol[2,:], label = "y")
@@ -110,8 +74,6 @@ ang = plot!(sol[12,:], label = "wy")
 ang = plot!(sol[13,:], label = "wz")
 display(plot(ang, title = "Angle"))
 
-
-states = sol[:,:];
 
 
 # Measurement
@@ -150,12 +112,15 @@ function g(x, t) # Epc has already been added to t
 
     sN_current = sun_position(t)   
     bN_current = IGRF13(pos*dscale, t)
+
+    ecl = eclipse_conical(pos*dscale, sN_current)
+
     sN_current = sN_current / norm(sN_current)
     bN_current = bN_current / norm(bN_current)
 
 
-    sB = R * sN_current + 0.005 * randn(3);
-    bB = R * bN_current + 0.01 * randn(3);
+    sB = R * sN_current + η_sun_body;
+    bB = R * bN_current + η_mag_body;
 
     Is = zeros(numDiodes)
 
@@ -163,84 +128,47 @@ function g(x, t) # Epc has already been added to t
 
         n = [cos(ϵs[i])*cos(αs[i]) cos(ϵs[i])*sin(αs[i]) sin(ϵs[i])]
 
-        Ii = cVals[i] * n * sB .+ 0 .+ 0.01*randn(1); # ση = 0.1, no albedo yet
+        Ii = cVals[i] * n * sB .+ 0; #  no albedo yet
 
-        Is[i] = Ii[1]
+        Is[i] = Ii[1] * ecl ######   When ν = 1, current is normal, when ν = 0, no current, and in between it gets scaled (?)
     end
+    if minCurrentFlag
+        Is[Is .< 0] .= 0  # Photodiodes can't generate negative current
+    end
+    
 
     Y = [sB[:]; bB[:]; Is[:]];
-    return Y, sN_current, bN_current
+    return Y, sN_current, bN_current, ecl
     
 end
 
-
-numDiodes = 5;
-cVals = 1 .+ 0.2 * randn(numDiodes);
-
-ϵs = (pi/4) .+ 0.2 * randn(numDiodes);
-#   Elevation ∈ [0, π/2]
-idxs = (ϵs .> (pi/2));
-ϵs[idxs] .= (pi/2);
-idxs = (ϵs .< 0);
-ϵs[idxs] .= 0
-
-
-# Azimuth ∈ [0, 2π)
-αs = (pi/2) .+ 0.3 * randn(numDiodes);
-idxs = (αs .>= (2*pi));
-αs[idxs] .= (2*pi - 0.1);
-idxs = (αs .< 0);
-αs[idxs] .= 0
-
-
+epc = Epoch(2019, 1, 1, 12, 0, 0, 0.0) # initial time for sim
 yhist = zeros((6 + numDiodes), size(states,2))
-
-
-# sN_c = [  0.6692628932588212;  # Manchesters
-#         -0.681848889145605;
-#         0.2952444276827865];
-
-# bN_c = [  0.26270092455049937;
-#         -0.7082385474829961;
-#         -0.6552758076562027];
-
-# sN = [0.19126880387025275; # Averaged
-#      -0.9005430099234119; 
-#      -0.3904331780119909];
-
-# bN = [0.28322329459216955;
-#      -0.04528518125275634;  
-#       0.9574935528139525];
 
 
 sN = zeros(3, size(states,2))
 bN = zeros(3, size(states,2))
+eclipse = zeros(size(states,2))
 dt = saveRate
 
 for i = 1:size(states,2)
     t = dt * (i-1);
     t_current = epc + (t * tscale)
-    yhist[:,i], sN[:,i], bN[:,i] = g(states[:,i], t_current)
+    yhist[:,i], sN[:,i], bN[:,i], eclipse[i] = g(states[:,i], t_current)
 end
 
 
-β0 = w0 * 0.1;
-b1 = rand(Normal(β0[1], 0.1 * β0[1]), size(yhist,2))'
-b2 = rand(Normal(β0[2], 0.1 * β0[2]), size(yhist,2))'
-b3 = rand(Normal(β0[3], 0.1 * β0[3]), size(yhist,2))'
-
-biases = [b1; b2; b3];
-whist = (states[11:13,:]+ biases)/tscale   # Not sure if i added bias in correctly. Should I just do it here...?
-biases = biases / tscale
+whist = (states[11:13,:] + biases)/tscale  
 dt = saveRate * tscale;
 
 rB1hist = yhist[1:3,:]
 rB2hist = yhist[4:6,:]
-Ihist = yhist[7:end,:]
+Ihist = yhist[7:end,:] + η_current
 
-iPlt = plot( yhist[7,:])
-iPlt = plot!(yhist[8,:])
-iPlt = plot!(yhist[9,:])
+iPlt = plot( Ihist[1,:], label = false)
+for i = 2:size(Ihist,1)
+    global iPlt = plot!(Ihist[i,:], label = false)
+end
 display(plot(iPlt, title = "Measured Current"))
 
 rPlt = plot( sN[1,:])
@@ -256,11 +184,11 @@ display(plot(rPlt, title = "Other vector (N)"))
 rN1 = sN;
 rN2 = bN;
 
-@save "mekf_data.jld2" rB1hist rB2hist rN1 rN2 Ihist whist numDiodes dt cVals αs ϵs 
+@save "mekf_data.jld2" rB1hist rB2hist rN1 rN2 Ihist whist numDiodes dt cVals αs ϵs eclipse
 
 qtrue = states[7:10,:]
-btrue = biases;
+btrue = biases / tscale;
 
-@save "mekf_truth.jld2" qtrue btrue
+@save "mekf_truth.jld2" qtrue btrue  
 
 println("finished")
