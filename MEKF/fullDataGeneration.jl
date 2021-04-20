@@ -10,7 +10,7 @@ using Random, Distributions
 using Attitude, SatelliteDynamics
 using JLD2
 include("mag_field.jl")
-include("TestingParameters/Test2a_NoNeg.jl")
+include("TestingParameters/Test_MatchPaper.jl")
 
 # State Propagation
 function qmult(q, p)
@@ -56,23 +56,23 @@ prob = ODEProblem(dynamics, x0, tspan, param);
 sol = solve(prob, Vern7(), reltol = 1e-8, saveat = saveRate);
 states = sol[:,:];
 
-pos = plot( sol[1,:], label = "x")
-pos = plot!(sol[2,:], label = "y")
-pos = plot!(sol[3,:], label = "z")
-display(plot(pos, title = "Position"))
+# pos = plot( sol[1,:], label = "x")
+# pos = plot!(sol[2,:], label = "y")
+# pos = plot!(sol[3,:], label = "z")
+# display(plot(pos, title = "Position"))
 
 
-quat = plot( sol[7,:], label = "i")
-quat = plot!(sol[8,:], label = "j")
-quat = plot!(sol[9,:], label = "k")
-quat = plot!(sol[10,:], label = "Scalar")
-display(plot(quat, title = "Quaternions"))
+# quat = plot( sol[7,:], label = "i")
+# quat = plot!(sol[8,:], label = "j")
+# quat = plot!(sol[9,:], label = "k")
+# quat = plot!(sol[10,:], label = "Scalar")
+# display(plot(quat, title = "Quaternions"))
 
 
-ang = plot( sol[11,:], label = "wx")
-ang = plot!(sol[12,:], label = "wy")
-ang = plot!(sol[13,:], label = "wz")
-display(plot(ang, title = "Angle"))
+# ang = plot( sol[11,:], label = "wx")
+# ang = plot!(sol[12,:], label = "wy")
+# ang = plot!(sol[13,:], label = "wz")
+# display(plot(ang, title = "Angle"))
 
 
 
@@ -130,7 +130,7 @@ function g(x, t) # Epc has already been added to t
 
         Ii = cVals[i] * n * sB .+ 0; #  no albedo yet
 
-        Is[i] = Ii[1] * ecl ######   When ν = 1, current is normal, when ν = 0, no current, and in between it gets scaled (?)
+        Is[i] = Ii[1] * ecl #   When ν = 1, current is normal, when ν = 0, no current, and in between it gets scaled (?)
     end
     if minCurrentFlag
         Is[Is .< 0] .= 0  # Photodiodes can't generate negative current
@@ -142,7 +142,7 @@ function g(x, t) # Epc has already been added to t
     
 end
 
-epc = Epoch(2019, 1, 1, 12, 0, 0, 0.0) # initial time for sim
+
 yhist = zeros((6 + numDiodes), size(states,2))
 
 
@@ -179,7 +179,7 @@ display(plot(rPlt, title = "Sun vector (N)"))
 rPlt = plot( bN[1,:])
 rPlt = plot!(bN[2,:])
 rPlt = plot!(bN[3,:])
-display(plot(rPlt, title = "Other vector (N)"))
+display(plot(rPlt, title = "Magnetic Field vector (N)"))
 
 rN1 = sN;
 rN2 = bN;

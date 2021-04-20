@@ -1,7 +1,7 @@
 function f(x,w)
     # State Propagation only involves a slight rotation 
     q = x[1:4];     # Quaternion portion
-    b = x[5:7]; # Bias portion
+    b = x[5:7];     # Bias portion
 
     γ = w-b;        # Adjusted angular velocity (w - biases)
     nγ = norm(γ)
@@ -29,9 +29,7 @@ function prediction(xk,w,dt, numDiodes)
 
     R = (I(3) + (skew/nγ)*sin(nγ*dt) + ((skew/nγ)^2)*(1 - cos(nγ*dt)));     # Rodrigues 
 
-    # A is jacobian of f(x)
-    A = [R -dt*I(3); zeros(3,3) I(3)];
-    # xn = [qp; b];
+    A = [R -dt*I(3); zeros(3,3) I(3)]; # Jacobian of f(x)
 
     c = xk[8:(7+numDiodes)]
     α = xk[(8+numDiodes):(7 + 2*numDiodes)]
@@ -39,13 +37,6 @@ function prediction(xk,w,dt, numDiodes)
 
     A = [A                           zeros(6, 3 * numDiodes); 
          zeros(3 * numDiodes, 6)     I(3*numDiodes)];
-
-    # _fClosure(x) = f(x, w);
-    # A_alt = ForwardDiff.jacobian(_fClosure, xk)
-    # println("Size A: ", size(A))
-    # println("Size A2: ", size(A_alt))
-    # diff = abs.(A - A_alt);
-    # println("Diff: ", sum(diff))
 
     xn = [qp; b; c; α; ϵ]; # x at next step
 

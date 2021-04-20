@@ -76,7 +76,7 @@ function measurement(x, rN, numDiodes, eclipse)
     rs = B_Q_N * rN[:,1]; # Assumes that rN[:,1] is the sun vector ##################
     rs_hat = [0     -rs[3]   rs[2];   rs[3]    0    -rs[1];  -rs[2]  rs[1]     0];
 
-    c = x[8:(7+numDiodes)]  # Find better way to index these
+    c = x[8:(7+numDiodes)]  
     α = x[(8+numDiodes):(7+2*numDiodes)]
     ϵ = x[(8+2*numDiodes):end]
 
@@ -108,7 +108,7 @@ function measurement(x, rN, numDiodes, eclipse)
     
 
     I_meas[I_meas .≤ 0] .= 0  # Photodiodes don't generate negative current
-    Ci[I_meas .≤ 0, :] .= 0    #  ^ Adjust the jacobian accordingly (note that technically I would change for slight angle changes near the boundary, but we ignore that)
+    Ci[I_meas .≤ 0, :] .= 0    #  ^ Adjust the jacobian accordingly (note that technically it would change for slight angle changes near the boundary, but we ignore that)
 
     I_meas = I_meas .* eclipse;
     Ci = Ci .* eclipse;
@@ -116,21 +116,5 @@ function measurement(x, rN, numDiodes, eclipse)
     C = [Cg; Ci];
     y = [rB[:]; I_meas[:]]; 
 
-
-    # _measurementClosure(x) = g(x, rN, numDiodes);
-    # C_alt = ForwardDiff.jacobian(_measurementClosure, x)
-
     return y, C
-
-       
-    # # # dy/dθ
-    # rB_hat_1 = [0 -rB[3,1] rB[2,1]; rB[3,1] 0 -rB[1,1]; -rB[2,1] rB[1,1] 0];
-    # rB_hat_2 = [0 -rB[3,2] rB[2,2]; rB[3,2] 0 -rB[1,2]; -rB[2,2] rB[1,2] 0];
-     
-    # # dy/dβ
-    # dβ = zeros(numDiodes, 3);
-
-    # C = [rB_hat_1 zeros(3,3); 
-    #      rB_hat_2 zeros(3,3)];
-    # y = rB[:];
 end

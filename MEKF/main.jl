@@ -16,30 +16,30 @@ include("rotationFunctions.jl")
 
 i = numDiodes
 μ_c = sum(cVals) / i;
-σ_α = deg2rad(5); # 5 degrees
-σ_ϵ = deg2rad(5);
-σ_c = 0.1 * μ_c;
+σ_α = deg2rad(7); # 5 degrees
+σ_ϵ = deg2rad(7);
+σ_c = 0.1 * μ_c; # 10 percent
 
 α0 = αs .+ rand(Normal(0.0, σ_α), i)
 ϵ0 = ϵs .+ rand(Normal(0.0, σ_ϵ), i)
 c0 = cVals .+ rand(Normal(0.0, σ_c), i)
+# c0 = maximum(Ihist, dims = 2)
 
 
 yhist = [rB1hist; rB2hist; Ihist]; # Measurements (bodyframe vectors)
 
 rN = [rN1; rN2];
 
-# # ADJUST THESE ##########
+# (Values just copied from example code)
 W = (3.04617e-10) .* I(6+3*i)
 V = (3.04617e-4)  .* I(6+i) # 6 for getting rotation, i for current measurements
 
 
-# Initial quaternion estimate (scalar first)
+# Initial quaternion estimate (scalar last)
 q0, R = triad(rN1[:,1],rN2[:,1],rB1hist[:,1],rB2hist[:,2]);
 β0 = [0;0;0];
 
 x0 = [q0; β0; c0; α0; ϵ0]; # Initialize with no bias, c=α=ϵ=rand, [7 x 3i]
-# x0 = [q0; β0];
 
 # 10 deg, 10 deg/sec, and σ_c, σ_α, σ_ϵ 1-sigma uncertainty 
 # σ_q = (10*pi/180)

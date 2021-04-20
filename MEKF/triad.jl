@@ -3,7 +3,7 @@ function triad(rN1,rN2,rB1,rB2)
     #   - Takes in a pair of vectors in the newtonian (inertial)
     #     frame and their corresponding pairs in the body frame.
     #   - Generates a DCM and then converts it into a quaternion (scalar
-    #       first)
+    #       last)
 
     tN1 = rN1;
     tN2 = cross(rN1,rN2)/norm(cross(rN1,rN2));

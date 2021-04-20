@@ -1,6 +1,6 @@
 function mekf(x0, P0, W, V, rN, whist, yhist, dt, numDiodes, eclipse)
 
-    xhist = zeros(size(x0,1),size(yhist,2)); # x = [q beta c α ϵ] = [q0 qi qj qk bx by bz ci αi ϵi ] x [N]
+    xhist = zeros(size(x0,1),size(yhist,2)); # x = [q beta c α ϵ] = [qi qj qk q0  bx by bz ci αi ϵi ] x [N]
     xhist[:,1] = x0;
     
     Phist = zeros(size(P0,1),size(P0,1),size(yhist,2));
@@ -13,8 +13,7 @@ function mekf(x0, P0, W, V, rN, whist, yhist, dt, numDiodes, eclipse)
         P_p = A*Phist[:,:,k]*A' + W; # Covariance prediction 
         
         
-        rNVecs = [rN[1:3,k] rN[4:6,k]]; #######################
-        # rNVecs = [rN[1:3] rN[4:6]] ##############################
+        rNVecs = [rN[1:3,k] rN[4:6,k]]; 
         yp, C = measurement(x_p, rNVecs, numDiodes, eclipse[k]);   # Gives us what we would expect to get out of yhist given our predicted x
         
         # Innovation
