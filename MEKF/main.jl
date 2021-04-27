@@ -3,16 +3,25 @@ using Plots
 using MAT, LinearAlgebra, ForwardDiff
 using JLD2
 using Random, Distributions
+using BlockDiagonals                     # For block diagonal 
 
-# Random.seed!(62386)
+# Random.seed!(384345)
+
+# include("mekf_alt.jl")
+# include("measurement.jl")
 
 include("mekf.jl"); 
-include("measurement.jl")
+include("sun_measurement.jl")
+include("mag_measurement.jl")
+include("current_measurement.jl")
+
 include("prediction.jl")
 include("triad.jl")
 include("rotationFunctions.jl")
 
-@load "mekf_data.jld2"
+
+@load "mekf_data.jld2" # rB1hist rB2hist rN1 rN2 Ihist whist numDiodes dt cVals αs ϵs eclipse
+
 
 i = numDiodes
 μ_c = sum(cVals) / i;
@@ -24,7 +33,6 @@ i = numDiodes
 ϵ0 = ϵs .+ rand(Normal(0.0, σ_ϵ), i)
 c0 = cVals .+ rand(Normal(0.0, σ_c), i)
 # c0 = maximum(Ihist, dims = 2)
-
 
 yhist = [rB1hist; rB2hist; Ihist]; # Measurements (bodyframe vectors)
 
@@ -85,14 +93,17 @@ display(plot(q0Plt, qiPlt, qjPlt, qkPlt, layout = (2,2), title = "Attitude"))
 eiPlt = plot(  (360/pi) * e[1,:], label = "Ei")
 eiPlt = plot!( (360/pi) * sqrt.(Phist[1,1,:]), color = :red, label = false) 
 eiPlt = plot!(-(360/pi) * sqrt.(Phist[1,1,:]), color = :red, label = false)
+eiPlt = plot!(whist[1,:]*500, color = :purple, label = "W_x")
 
 ejPlt = plot(  (360/pi) * e[2,:], label = "Ej")
 ejPlt = plot!( (360/pi) * sqrt.(Phist[2,2,:]), color = :red, label = false) 
 ejPlt = plot!(-(360/pi) * sqrt.(Phist[2,2,:]), color = :red, label = false)
+ejPlt = plot!(whist[2,:]*500, color = :purple, label = "W_y")
 
 ekPlt = plot(  (360/pi) * e[3,:], label = "Ek")
 ekPlt = plot!( (360/pi) * sqrt.(Phist[3,3,:]), color = :red, label = false) 
 ekPlt = plot!(-(360/pi) * sqrt.(Phist[3,3,:]), color = :red, label = false)
+ekPlt = plot!(whist[3,:]*1000, color = :purple, label = "W_z")
 
 display(plot(eiPlt, ejPlt, ekPlt, layout = (3,1), title = "Attitude Error (deg)"))
 

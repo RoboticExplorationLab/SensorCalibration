@@ -10,7 +10,7 @@ using Random, Distributions
 using Attitude, SatelliteDynamics
 using JLD2
 include("mag_field.jl")
-include("TestingParameters/Test_MatchPaper.jl")
+include("TestingParameters/Test_OurSat.jl")
 
 # State Propagation
 function qmult(q, p)
@@ -56,23 +56,23 @@ prob = ODEProblem(dynamics, x0, tspan, param);
 sol = solve(prob, Vern7(), reltol = 1e-8, saveat = saveRate);
 states = sol[:,:];
 
-# pos = plot( sol[1,:], label = "x")
-# pos = plot!(sol[2,:], label = "y")
-# pos = plot!(sol[3,:], label = "z")
-# display(plot(pos, title = "Position"))
+pos = plot( sol[1,:], label = "x")
+pos = plot!(sol[2,:], label = "y")
+pos = plot!(sol[3,:], label = "z")
+display(plot(pos, title = "Position"))
 
 
-# quat = plot( sol[7,:], label = "i")
-# quat = plot!(sol[8,:], label = "j")
-# quat = plot!(sol[9,:], label = "k")
-# quat = plot!(sol[10,:], label = "Scalar")
-# display(plot(quat, title = "Quaternions"))
+quat = plot( sol[7,:], label = "i")
+quat = plot!(sol[8,:], label = "j")
+quat = plot!(sol[9,:], label = "k")
+quat = plot!(sol[10,:], label = "Scalar")
+display(plot(quat, title = "Quaternions"))
 
 
-# ang = plot( sol[11,:], label = "wx")
-# ang = plot!(sol[12,:], label = "wy")
-# ang = plot!(sol[13,:], label = "wz")
-# display(plot(ang, title = "Angle"))
+ang = plot( sol[11,:], label = "wx")
+ang = plot!(sol[12,:], label = "wy")
+ang = plot!(sol[13,:], label = "wz")
+display(plot(ang, title = "Angle"))
 
 
 
@@ -115,7 +115,7 @@ function g(x, t) # Epc has already been added to t
 
     ecl = eclipse_conical(pos*dscale, sN_current)
 
-    sN_current = sN_current / norm(sN_current)
+    sN_current = (sN_current / norm(sN_current))   # Should this be here or on the sB term?
     bN_current = bN_current / norm(bN_current)
 
 
@@ -156,6 +156,8 @@ for i = 1:size(states,2)
     t_current = epc + (t * tscale)
     yhist[:,i], sN[:,i], bN[:,i], eclipse[i] = g(states[:,i], t_current)
 end
+
+println("Need to zero out sun current once testing is finished!")
 
 
 whist = (states[11:13,:] + biases)/tscale  
