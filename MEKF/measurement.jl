@@ -1,4 +1,4 @@
-function g(x, rN, numDiodes)
+function g(x, rN, numDiodes, eclipse)
     x = x[:]
     q = x[1:4]
     β = x[5:7]
@@ -40,7 +40,9 @@ function g(x, rN, numDiodes)
     Ci = [dθ dβ Diagonal(dc) Diagonal(dα) Diagonal(dϵ)]  # Jacobian for current measurement portion, [i, 6+3i]
     C = [Cr; Ci];
 
-    I_meas = c .* (n * rs) .+ 0; # Measured current, no albedo      
+    I_meas = c .* (n * rs) .+ 0; # Measured current, no albedo     
+    I_meas[I_meas .≤ 0] .= 0 
+    I_meas = I_meas .* eclipse;
 
     y = [rB[:]; I_meas[:]]; 
 
@@ -115,6 +117,21 @@ function measurement(x, rN, numDiodes, eclipse)
 
     C = [Cg; Ci];
     y = [rB[:]; I_meas[:]]; 
+
+    #################################
+    qv = q[1:3]; q0 = q[4];
+    G = [-qv'; (q0*I(3) + hat(qv))] / 2;
+
+    E_temp = BlockDiagonal([I(3), I(numDiodes), I(numDiodes), I(numDiodes)])
+    E = [G zeros(4,3+3*numDiodes);
+         zeros(3+3*numDiodes, 3) E_temp]
+
+    _measurementClosure(x) = g(x, rN, numDiodes, eclipse)
+    C_alt = ForwardDiff.jacobian(_measurementClosure, x)
+
+    C_altalt = C_alt * E
+
+    #################################
 
     return y, C
 end

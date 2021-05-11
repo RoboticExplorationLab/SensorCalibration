@@ -30,7 +30,7 @@ function mag_measurement(x, bN, i)
     ∂ϵ = zeros(3, i)
 
     H = [∂θ ∂β ∂C ∂α ∂ϵ]; # [3 x 6 + 3i]
-    y = bB[:]             # [3,]
+    y = bB[:]             # [3 x 1]
 
     return y, H
 end

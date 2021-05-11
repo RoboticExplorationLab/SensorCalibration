@@ -1,6 +1,6 @@
 function mekf(x0, P0, W, V, rN, whist, yhist, dt, numDiodes, eclipse)
 
-    xhist = zeros(size(x0,1),size(yhist,2)); # x = [q β c α ϵ] = [qi qj qk q0  bx by bz  ci  αi  ϵi ] x [N]
+    xhist = zeros(size(x0,1),size(yhist,2)); # x = [q β c α ϵ] = [qi qj qk q0  bx by bz  ci  αi  ϵi ]   | [7 + 3i x n]
     xhist[:,1] = x0;
     
     Phist = zeros(size(P0,1),size(P0,1),size(yhist,2));
@@ -11,9 +11,10 @@ function mekf(x0, P0, W, V, rN, whist, yhist, dt, numDiodes, eclipse)
         # Predict x, P
         x_p, A = prediction(xhist[:,k],whist[:,k],dt, numDiodes); # State prediction
         P_p = A*Phist[:,:,k]*A' + W; # Covariance prediction 
+
+        # Measurement
         z = [] 
         C = Array{Float64}(undef, 0, size(P_p,1))
-
         Vs = Array{Float64}(undef)  ############ ASSUMES NO CORRELATION AT ALL!!!!
 
         if eclipse[k] > 0  #  Sun Vector measurement
@@ -69,7 +70,7 @@ function mekf(x0, P0, W, V, rN, whist, yhist, dt, numDiodes, eclipse)
         xhist[1:4,k+1] = qmult(x_p[1:4], dq); 
         xhist[5:end, k+1] = x_p[5:end] + drest;
         
-        Phist[:,:,k+1] = (I(size(Phist,1)) - L*C) * P_p * (I(size(Phist,1)) - L*C)' + L*Vk*L';  #covariance update %%%%% V or Vk?
+        Phist[:,:,k+1] = (I(size(Phist,1)) - L*C) * P_p * (I(size(Phist,1)) - L*C)' + L*Vk*L';  
     end
     
     

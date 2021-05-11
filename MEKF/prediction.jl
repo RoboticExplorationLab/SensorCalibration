@@ -27,7 +27,7 @@ function prediction(xk,w,dt, numDiodes)
     
     skew = -1*[0 -γ[3] γ[2]; γ[3] 0 -γ[1]; -γ[2] γ[1] 0]; # Hat
 
-    R = (I(3) + (skew/nγ)*sin(nγ*dt) + ((skew/nγ)^2)*(1 - cos(nγ*dt)));     # Rodrigues 
+    R = (I(3) + (skew/nγ)*sin(nγ*dt) + ((skew/nγ)^2)*(1 - cos(nγ*dt)));     # Rodrigues (for matrix exponential?)
 
     A = [R -dt*I(3); zeros(3,3) I(3)]; # Jacobian of f(x)
 

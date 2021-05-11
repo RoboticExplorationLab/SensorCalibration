@@ -19,10 +19,10 @@ function sun_measurement(x, sN, i)
     α = x[(8+i):(7+2*i)]
     ϵ = x[(8+2*i):end]
 
-    B_Q_N = dcm_from_q(q)'; # DCM from quaternion (flipped)    
+    B_Q_N = dcm_from_q(q)'; # DCM from quaternion (flipped)   TODO why flipped?    
     sB = B_Q_N*sN;  # this is what the sun measurement would be given our estimated attitude
 
-    sB_hat = hat(sB); #[0 -rB[3,1] rB[2,1]; rB[3,1] 0 -rB[1,1]; -rB[2,1] rB[1,1] 0];
+    sB_hat = hat(sB); 
     ∂θ = sB_hat 
     ∂β = zeros(3, 3)
     ∂C = zeros(3, i)
@@ -30,7 +30,7 @@ function sun_measurement(x, sN, i)
     ∂ϵ = zeros(3, i)
 
     H = [∂θ ∂β ∂C ∂α ∂ϵ]; # [3 x 6 + 3i]
-    y = sB[:]             # [3,]
+    y = sB[:]             # [3 x 1]
 
     return y, H
 end

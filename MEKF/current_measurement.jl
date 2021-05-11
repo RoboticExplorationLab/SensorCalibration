@@ -23,7 +23,7 @@ function current_measurement(x, sN, i, ecl)
     B_Q_N = dcm_from_q(q)'; # DCM from quaternion (flipped)    
     sB = B_Q_N*sN;  # this is what the sun measurement would be given our sun vector
 
-    sB_hat = hat(sB); #[0 -rB[3,1] rB[2,1]; rB[3,1] 0 -rB[1,1]; -rB[2,1] rB[1,1] 0];
+    sB_hat = hat(sB); 
     n = [cos.(ϵ).*cos.(α) cos.(ϵ).*sin.(α) sin.(ϵ)];  # [i x 3]
     
     ∂θ = (c .* n) * sB_hat; # [i x 3]
@@ -44,7 +44,7 @@ function current_measurement(x, sN, i, ecl)
     I_meas *= ecl
     I_meas[I_meas .≤ 0] .= 0  # Photodiodes don't generate negative current
     H[I_meas .≤ 0, :] .= 0    # ^ To match the above
-    y = I_meas[:]     # [i,]
+    y = I_meas[:]     # [i x 1]
 
     return y, H
 end

@@ -7,9 +7,6 @@ using BlockDiagonals                     # For block diagonal
 
 # Random.seed!(384345)
 
-# include("mekf_alt.jl")
-# include("measurement.jl")
-
 include("mekf.jl"); 
 include("sun_measurement.jl")
 include("mag_measurement.jl")
@@ -20,27 +17,64 @@ include("triad.jl")
 include("rotationFunctions.jl")
 
 
-@load "mekf_data.jld2" # rB1hist rB2hist rN1 rN2 Ihist whist numDiodes dt cVals αs ϵs eclipse
+@load "mekf_data.jld2" # rB1hist rB2hist rN1 rN2 Ihist whist num_diodes dt calib_vals αs ϵs eclipse
 
 
-i = numDiodes
-μ_c = sum(cVals) / i;
-σ_α = deg2rad(7); # 5 degrees
-σ_ϵ = deg2rad(7);
+i = num_diodes
+μ_c = sum(calib_vals) / i;
+σ_α = deg2rad(5); # 5 degrees
+σ_ϵ = deg2rad(5);
 σ_c = 0.1 * μ_c; # 10 percent
 
 α0 = αs .+ rand(Normal(0.0, σ_α), i)
 ϵ0 = ϵs .+ rand(Normal(0.0, σ_ϵ), i)
-c0 = cVals .+ rand(Normal(0.0, σ_c), i)
-# c0 = maximum(Ihist, dims = 2)
+c0 = calib_vals .+ rand(Normal(0.0, σ_c), i)
 
 yhist = [rB1hist; rB2hist; Ihist]; # Measurements (bodyframe vectors)
 
 rN = [rN1; rN2];
 
+
+
+#############  
+estimator_params = (angle_random_walk      = 0.06,   # in deg/sqrt(hour)   
+                    gyro_bias_instability  = 0.8,    # Bias instability in deg/hour
+                    velocity_random_walk   = 0.014,  # in m/sec/sqrt(hour)
+                    accel_bias_instability = 6)      # in microG
+
+# Qbb = ((estimator_params[:accel_bias_instability]*(9.80665/1e6))^2)/(3600^3)
+# Qgg = ((estimator_params[:gyro_bias_instability] * (pi/180)    )^2)/(3600^3)   # TODO why (seconds/hour)^3? -> Units are rad^2 /seconds^3?
+# Qaa = ((estimator_params[:velocity_random_walk])^2)/3600
+# Qww = ((estimator_params[:angle_random_walk]*(pi/180))^2)/3600                 # Units are rad^2 / second
+
+
+Q_gyro = ((estimator_params[:gyro_bias_instability] * (pi/180)    )^2)/(3600^3)  # Units are now rad^2/seconds^3...?
+σ_orient = sqrt(Q_gyro);
+
+
+Q_bias = ((estimator_params[:angle_random_walk]*(pi/180))^2)/(3600)
+σ_bias = sqrt(Q_bias)
+
+
+Q_diode = 1e-6 # Diode Noise 
+
+
+
+# σ_cal = 0.1 * σ_c; σ_azi = 0.1 * σ_α; σ_ele = 0.1 * σ_ϵ;
+σ_cal = Q_diode; σ_azi = Q_diode; σ_ele = Q_diode;
+σ_sunVec = noiseValues[:σ_η_sun]; σ_magVec = noiseValues[:σ_η_mag]; σ_curr = noiseValues[:σ_η_cur];
+
+W = Diagonal([σ_orient * ones(3); σ_bias * ones(3); σ_cal * ones(i); σ_azi * ones(i); σ_ele * ones(i)])
+V = Diagonal([σ_sunVec * ones(3); σ_magVec * ones(3); σ_curr * ones(i)])
+
+# W = abs.(W)
+# V = abs.(V)
+
 # (Values just copied from example code)
-W = (3.04617e-10) .* I(6+3*i)
-V = (3.04617e-4)  .* I(6+i) # 6 for getting rotation, i for current measurements
+# W = (3.04617e-10) .* I(6+3*i)
+# V = (3.04617e-4)  .* I(6+i) # 6 for getting rotation, i for current measurements
+#############
+
 
 
 # Initial quaternion estimate (scalar last)
@@ -93,17 +127,17 @@ display(plot(q0Plt, qiPlt, qjPlt, qkPlt, layout = (2,2), title = "Attitude"))
 eiPlt = plot(  (360/pi) * e[1,:], label = "Ei")
 eiPlt = plot!( (360/pi) * sqrt.(Phist[1,1,:]), color = :red, label = false) 
 eiPlt = plot!(-(360/pi) * sqrt.(Phist[1,1,:]), color = :red, label = false)
-eiPlt = plot!(whist[1,:]*500, color = :purple, label = "W_x")
+# eiPlt = plot!(whist[1,:]*500, color = :purple, label = "W_x")
 
 ejPlt = plot(  (360/pi) * e[2,:], label = "Ej")
 ejPlt = plot!( (360/pi) * sqrt.(Phist[2,2,:]), color = :red, label = false) 
 ejPlt = plot!(-(360/pi) * sqrt.(Phist[2,2,:]), color = :red, label = false)
-ejPlt = plot!(whist[2,:]*500, color = :purple, label = "W_y")
+# ejPlt = plot!(whist[2,:]*500, color = :purple, label = "W_y")
 
 ekPlt = plot(  (360/pi) * e[3,:], label = "Ek")
 ekPlt = plot!( (360/pi) * sqrt.(Phist[3,3,:]), color = :red, label = false) 
 ekPlt = plot!(-(360/pi) * sqrt.(Phist[3,3,:]), color = :red, label = false)
-ekPlt = plot!(whist[3,:]*1000, color = :purple, label = "W_z")
+# ekPlt = plot!(whist[3,:]*1000, color = :purple, label = "W_z")
 
 display(plot(eiPlt, ejPlt, ekPlt, layout = (3,1), title = "Attitude Error (deg)"))
 
@@ -129,24 +163,24 @@ xhist[(8+i):end,:] = rad2deg.(xhist[(8+i):end,:]);
 ϵs = rad2deg.(ϵs)
 
 ### Calibration Estimates
-cPlt1 = plot( xhist[8,:] .- cVals[1], color = :blue, label = false)
+cPlt1 = plot( xhist[8,:] .- calib_vals[1], color = :blue, label = false)
 cPlt1 = plot!( 2*sqrt.(Phist[7,7,:]), color = :red, label = false)
 cPlt1 = plot!(-2*sqrt.(Phist[7,7,:]), color = :red, label = false)
 
-cPlt2 = plot( xhist[9,:] .- cVals[2], color = :blue, label = false)
+cPlt2 = plot( xhist[9,:] .- calib_vals[2], color = :blue, label = false)
 cPlt2 = plot!( 2*sqrt.(Phist[8,8,:]), color = :red, label = false)
 cPlt2 = plot!(-2*sqrt.(Phist[8,8,:]), color = :red, label = false)
 
-cPlt3 = plot( xhist[10,:] .- cVals[3], color = :blue, label = false)
+cPlt3 = plot( xhist[10,:] .- calib_vals[3], color = :blue, label = false)
 cPlt3 = plot!( 2*sqrt.(Phist[9,9,:]), color = :red, label = false)
 cPlt3 = plot!(-2*sqrt.(Phist[9,9,:]), color = :red, label = false)
 
 # cPlt1 = plot( xhist[8,:], color = "red", label = false)
-# cPlt1 = hline!([cVals[1]], color = "red", label = false, linestyle = :dash)
+# cPlt1 = hline!([calib_vals[1]], color = "red", label = false, linestyle = :dash)
 # cPlt2 = plot(xhist[9,:], color = "blue", label = false)
-# cPlt2 = hline!([cVals[2]], color = "blue", label = false, linestyle = :dash)
+# cPlt2 = hline!([calib_vals[2]], color = "blue", label = false, linestyle = :dash)
 # cPlt3 = plot(xhist[10,:], color = "green", label = false)
-# cPlt3 = hline!([cVals[3]], color = "green", label = false, linestyle = :dash)
+# cPlt3 = hline!([calib_vals[3]], color = "green", label = false, linestyle = :dash)
 display(plot(cPlt1, cPlt2, cPlt3, layout = (3,1), title = "Calibration values"))
 
 

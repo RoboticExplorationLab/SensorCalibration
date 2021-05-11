@@ -36,7 +36,6 @@ function q_from_DCM(R)
     return q
 end
 
-##### DO I NEED TO NORMALIZE ANYTHING HERE?
 function dcm_from_q(quat)
     # Takes in a quaternion (scalar last - [q⃗, q]) and returns the DCM  (From Kevin)
     
