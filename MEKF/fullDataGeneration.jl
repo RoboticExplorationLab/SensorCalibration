@@ -1,196 +1,209 @@
-using Pkg
-using Plots
+using Pkg, Plots
 cd(@__DIR__)
-Pkg.activate(".")
+Pkg.activate(".")  # Load in the project/manifest file stuff to get right versions
 Pkg.instantiate()
 
-using DifferentialEquations
-using LinearAlgebra
-using Random, Distributions
-using Attitude, SatelliteDynamics
-using JLD2
-include("mag_field.jl")
-include("TestingParameters/Test_OurSat.jl")
+using SatelliteDynamics # for mag_field.jl
+using StaticArrays # for SVectors, used for speed (?)
+using Random       # For generating random numbers (e.g., noise)
+using JLD2         # For saving 
+using LinearAlgebra 
 
-# State Propagation
-function qmult(q, p)
-    # Performs quaternion multiplication (Hamilton product) 
-    #   (Quaternions are scalar last)
 
-    q = q[:]
-    p = p[:]
-    
-    q0, p0 = q[4], p[4]
-    q⃗ = q[1:3]
-    p⃗ = p[1:3]
+include("mag_field.jl") # From Kevin, used for IGRF13 
+include("rotationFunctions.jl") # Includes common functions for dealing with quaternions
+include("satellite_configuration_file.jl") # Includes satellite parameters
+# ^ Should I make this a class? Dont have to worry about clearing globals
 
-    r0 = q0 * p0 - dot(q⃗, p⃗)
-    r⃗ = (q0 * p⃗) + (p0 * q⃗) + cross(q⃗, p⃗)
+function rk4(f, params, x_n, h, t_n)
+    """ 
+        RK4, but with no external force, and parameters passed in instead of u.
+            (Based off of code from Kevin)
+    """
+    x_n = SVector{num_states}(x_n)
 
-    r = [r⃗; r0]
-    return r
+    k1 = h*f(x_n, params, t_n)
+    k2 = h*f(x_n+k1/2, params, t_n + h/2)
+    k3 = h*f(x_n+k2/2, params, t_n + h/2)
+    k4 = h*f(x_n+k3, params, t_n + h)
+
+    return (x_n + (1/6)*(k1+2*k2+2*k3 + k4))
 end
 
-function dynamics(xdot, x, p, t)
-    # x = [px py pz vx vy vz quat(scalar last) wx wy wz] + bias terms
+# NO reliance on globals (σ_β...?)
+function dynamics(x, param, t) 
+    """ 
+        Dynamics of the system
+          - x: [ [px, py, pz], [vx, vy, vz], [q⃗, q0], [wx, wy, wz], [βx, βy, βz]]     | [16,]  
+          - param: Standard Gravitational Parameter, Earth radius,
+                satellite orbit radius, and satellite inertial matrix                 | [4,]
+          - t: Time (not currently being used, could be useful for better accel)      | Scalar
 
-    mu, Re, r = p
-    xdot[1:3] = x[4:6]; 
+        (Note that everything is in adjusted units, not necessarily m/s)
+    """
+    mu, Re, r, J = param   
+    xdot = zeros(size(x))
 
-    normr = norm(x[1:3])
-    a = (-mu / (normr^3)) * x[1:3]
-    xdot[4:6] = a 
+    if norm(x[1:3]) < Re # Check if satellite crashes into Earth
+        error("Impact!")
+    end
 
-    q = x[7:10]
+    # dot[px, py, pz] = [vx, vy, vz]
+    xdot[1:3] = x[4:6]
 
+    # dot[vx, vy, vz] = a⃗ = -mu r̂ / ||r||^3
+    xdot[4:6] = (-mu / (norm(x[1:3])^3)) * x[1:3]
+
+    # dot[q] = 0.5 q ⋅ [w; 0]
     w = x[11:13]
+    xdot[7:10] = 0.5 * qmult(x[7:10], [w; 0])
 
-    xdot[7:10] = 0.5 * qmult(q, [w; 0])
+    # dot[w] = J_inv * (-w x Jw)
+    xdot[11:13] = (J^(-1)) * cross(-w, (J*w))
 
-    xdot[11:13] = ((J^(-1))) * cross(-w, (J*w));
+    # bias is just a random walk, so β = β + η
+    xdot[14:16] = σ_β * randn(3)   
 
-end
+    return xdot
+end 
 
+# TODO: Add in Albedo
+function measurement(x, t)  
+    """
+        Generates system measurements 
+          - x: [ [px, py, pz], [vx, vy, vz], [q⃗, q0], [wx, wy, wz], [βx, βy, βz] ]     |  [16,]
+          - t: current time since start (adjusted units)                               |  scalar
+    """
+    t = epc + (t * tscale)
+    q_vec = x[7:9];  q_sca = x[10];
 
-prob = ODEProblem(dynamics, x0, tspan, param);
-sol = solve(prob, Vern7(), reltol = 1e-8, saveat = saveRate);
-states = sol[:,:];
+    R_B2N = I(3) + 2 * hat(q_vec) * (q_sca * I(3) + hat(q_vec)); # Equation from Kevin, quaternion -> DCM (eq 39)
+    R_N2B = transpose(R_B2N)
 
-pos = plot( sol[1,:], label = "x")
-pos = plot!(sol[2,:], label = "y")
-pos = plot!(sol[3,:], label = "z")
-display(plot(pos, title = "Position"))
+    pos = x[1:3]
+    sN = sun_position(t)         # Sun vector in Newtonian frame 
+    bN = IGRF13(pos * dscale, t) # Mag vector in Newtonian frame
 
+    ecl = eclipse_conical(pos * dscale, sN) # Determine if there is an eclipse (∈ [0, 1])
 
-quat = plot( sol[7,:], label = "i")
-quat = plot!(sol[8,:], label = "j")
-quat = plot!(sol[9,:], label = "k")
-quat = plot!(sol[10,:], label = "Scalar")
-display(plot(quat, title = "Quaternions"))
+    sN = ecl * (sN / norm(sN)) # Make unit, zero out if sun is blocked 
+    bN = (bN / norm(bN))       # Make unit
 
+    # TODO verify noise magnitude
+    η_sun = get_noise_matrix(σ_η_sun, dt)
+    η_mag = get_noise_matrix(σ_η_mag, dt)
 
-ang = plot( sol[11,:], label = "wx")
-ang = plot!(sol[12,:], label = "wy")
-ang = plot!(sol[13,:], label = "wz")
-display(plot(ang, title = "Angle"))
+    sB = η_sun * (R_N2B * sN) # (noisy) Sun vector in body frame
+    bB = η_mag * (R_N2B * bN) # (noisy) Mag vector in body frame
 
+    current_vals = zeros(num_diodes) # Currents being generated by each photodiode
 
-
-# Measurement
-function hat(x)
-    x = x[:];
-    h = [0     -x[3]  x[2];
-         x[3]    0   -x[1];
-         -x[2]  x[1]    0];
-end
-
-function quat2rot(quat)
-    # Scalar-last quaternions
-    
-    q = quat[:];
-    
-    s = norm(q)^(-2);
-    qr = q[4];
-    qi = q[1];
-    qj = q[2];
-    qk = q[3];
-    
-    R = [(1 - 2*s*(qj^2 + qk^2)) (2*s*(qi*qj - qk*qr)) (2*s*(qi*qk + qj*qr));
-        (2*s*(qi*qj + qk*qr))   (1-2*s*(qi^2+qk^2))   (2*s*(qj*qk - qi*qr));
-        (2*s*(qi*qk - qj*qr))   (2*s*(qj*qk+qi*qr))   (1-2*s*(qi^2 + qj^2))];
-    
-end
-
-function g(x, t) # Epc has already been added to t
-    pos = x[1:3];
-    q = x[7:10];
-
-    qVec = q[1:3];
-    qSca = q[4];
-    R = I(3) + 2 * hat(qVec) * (qSca * I(3) + hat(qVec)); # R N->B   
-    R = transpose(R); # R B->N
-
-    sN_current = sun_position(t)   
-    bN_current = IGRF13(pos*dscale, t)
-
-    ecl = eclipse_conical(pos*dscale, sN_current)
-
-    sN_current = (sN_current / norm(sN_current))   # Should this be here or on the sB term?
-    bN_current = bN_current / norm(bN_current)
-
-
-    sB = R * sN_current + η_sun_body;
-    bB = R * bN_current + η_mag_body;
-
-    Is = zeros(numDiodes)
-
-    for i = 1:numDiodes
-
-        n = [cos(ϵs[i])*cos(αs[i]) cos(ϵs[i])*sin(αs[i]) sin(ϵs[i])]
-
-        Ii = cVals[i] * n * sB .+ 0; #  no albedo yet
-
-        Is[i] = Ii[1] * ecl #   When ν = 1, current is normal, when ν = 0, no current, and in between it gets scaled (?)
+    albedo = 0;  # TODO 
+    for i = 1:num_diodes
+        surface_normal = [cos(ϵs[i])*cos(αs[i]) cos(ϵs[i])*sin(αs[i]) sin(ϵs[i])]     # Photodiode surface normal 
+        current = calib_vals[i]  * surface_normal * sB .+ albedo .+ σ_η_cur * randn() # Calculate current, including noise and Earth's albedo 
+        current_vals[i] = current[1] * ecl  # Scale by eclipse factor 
     end
-    if minCurrentFlag
-        Is[Is .< 0] .= 0  # Photodiodes can't generate negative current
+
+    # NOTE should I do this before or after noise?
+    current_vals[current_vals .< 0] .= 0 # Photodiodes don't generate negative current
+
+    Y =  [sB[:]; bB[:]; sN[:]; bN[:]; ecl; current_vals[:]]
+    return Y
+end
+
+function get_noise_matrix(σ, dt)
+    """
+        Generates a [3 x 3] noise rotation matrix given a standard deviation 
+            First generates a noise vector and then converts that into a rotation matrix
+            (Note that if the standard deviation provided is 0, the identity matrix is returned)
+    """
+    if σ != 0.0
+        η_vec = σ * randn(3) # Generate a vector 
+        skew = hat(η_vec)
+        norm_η = norm(η_vec)
+
+        R = (I(3) + (skew/norm_η)*sin(norm_η*dt) + ((skew/norm_η)^2)*(1 - cos(norm_η*dt))); # Rodrigues for matrix exponential (?)
+    else
+        R = I(3)
     end
-    
-
-    Y = [sB[:]; bB[:]; Is[:]];
-    return Y, sN_current, bN_current, ecl
-    
+    return R
 end
 
+function generate_data(x0, T, dt)
+    """
+        Propagates the system dynamics forward for a specified number of points and updates measurment values
+    """
+    X = zeros(num_states, T)
+    Y = zeros(num_meas, T)
+    X[:,1] = x0
 
-yhist = zeros((6 + numDiodes), size(states,2))
+    for i = 1:(T-1)
+        t = (i - 1) * dt  
+        X[:, i + 1] = rk4(dynamics, dynamics_params, X[:,i], dt, t)
+        Y[:, i] = measurement(X[:,i], t)
+    end
+    Y[:,T] = measurement(X[:,T], (T-1)*dt)
 
-
-sN = zeros(3, size(states,2))
-bN = zeros(3, size(states,2))
-eclipse = zeros(size(states,2))
-dt = saveRate
-
-for i = 1:size(states,2)
-    t = dt * (i-1);
-    t_current = epc + (t * tscale)
-    yhist[:,i], sN[:,i], bN[:,i], eclipse[i] = g(states[:,i], t_current)
+    X[11:13,:] = X[11:13,:] .+ X[14:16,:] # Add in bias to the omega vectors (Note that this is done here so as to not interfere with the dynamics)
+    return X, Y
 end
 
-println("Need to zero out sun current once testing is finished!")
+###### PROPAGATE DYNAMICS #####
+states, meas = generate_data(x0, T, dt)
+println("Finished propagating dynamics")
 
 
-whist = (states[11:13,:] + biases)/tscale  
-dt = saveRate * tscale;
+##### GENERATE MEASUREMENTS #####
+# History of respective values 
+sB_hist = zeros(3, T)
+bB_hist = zeros(3, T)
+I_hist  = zeros(num_diodes, T)
+sN_hist = zeros(3, T) 
+bN_hist = zeros(3, T) 
+ecl_hist= zeros(T)    
 
-rB1hist = yhist[1:3,:]
-rB2hist = yhist[4:6,:]
-Ihist = yhist[7:end,:] + η_current
-
-iPlt = plot( Ihist[1,:], label = false)
-for i = 2:size(Ihist,1)
-    global iPlt = plot!(Ihist[i,:], label = false)
+for i = 1:T 
+    sB_hist[:,i] = meas[1:3,i] 
+    bB_hist[:,i] = meas[4:6,i] 
+    sN_hist[:,i] = meas[7:9,i] 
+    bN_hist[:,i] = meas[10:12,i]  
+    ecl_hist[i]  = meas[13,i]
+    I_hist[:,i] = meas[14:(13+num_diodes),i]
 end
-display(plot(iPlt, title = "Measured Current"))
+println("Finished splitting measurements")
 
-rPlt = plot( sN[1,:])
-rPlt = plot!(sN[2,:])
-rPlt = plot!(sN[3,:])
-display(plot(rPlt, title = "Sun vector (N)"))
 
-rPlt = plot( bN[1,:])
-rPlt = plot!(bN[2,:])
-rPlt = plot!(bN[3,:])
-display(plot(rPlt, title = "Magnetic Field vector (N)"))
+##### SAVE DATA #####
+whist = states[11:13,:] / tscale 
+biases = states[14:16,:] / tscale
+dt = dt * tscale
+noiseValues = (σ_η_sun = σ_η_sun, σ_η_mag = σ_η_mag, σ_η_cur = σ_η_cur)
 
-rN1 = sN;
-rN2 = bN;
+rB1hist = sB_hist; rB2hist = bB_hist; rN1 = sN_hist; rN2 = bN_hist; eclipse = ecl_hist; Ihist = I_hist
 
-@save "mekf_data.jld2" rB1hist rB2hist rN1 rN2 Ihist whist numDiodes dt cVals αs ϵs eclipse
+@save "mekf_data.jld2" rB1hist rB2hist rN1 rN2 Ihist whist num_diodes dt calib_vals αs ϵs eclipse noiseValues
 
 qtrue = states[7:10,:]
-btrue = biases / tscale;
+btrue = biases
+pos = states[1:3,:] * dscale
 
-@save "mekf_truth.jld2" qtrue btrue  
+@save "mekf_truth.jld2" qtrue btrue pos
+println("Finished Saving")
 
-println("finished")
+##### PLOTS #####
+display(plot(states[1:3,:]', title = "Positions"))
+display(plot(sN_hist', title = "Sun Vector (N)"))
+display(plot(bN_hist', title = "Mag Vector (N)"))
+display(plot(I_hist', title = "Diode Currents (A)"))
+
+display(plot(states[14:16,:]', title = "Biases"))
+display(plot(states[11:13,:]', title = "W"))
+
+
+
+
+
+
+
+
