@@ -3,7 +3,7 @@ using Plots
 using MAT, LinearAlgebra, ForwardDiff
 using JLD2
 using Random, Distributions
-using BlockDiagonals                     # For block diagonal 
+using BlockDiagonals           
 
 # Random.seed!(384345)
 
@@ -16,9 +16,7 @@ include("prediction.jl")
 include("triad.jl")
 include("rotationFunctions.jl")
 
-
 @load "mekf_data.jld2" # rB1hist rB2hist rN1 rN2 Ihist whist num_diodes dt calib_vals αs ϵs eclipse
-
 
 i = num_diodes
 μ_c = sum(calib_vals) / i;
@@ -31,7 +29,6 @@ i = num_diodes
 c0 = calib_vals .+ rand(Normal(0.0, σ_c), i)
 
 yhist = [rB1hist; rB2hist; Ihist]; # Measurements (bodyframe vectors)
-
 rN = [rN1; rN2];
 
 
@@ -57,8 +54,6 @@ Q_bias = ((estimator_params[:angle_random_walk]*(pi/180))^2)/(3600)
 
 
 Q_diode = 1e-6 # Diode Noise 
-
-
 
 # σ_cal = 0.1 * σ_c; σ_azi = 0.1 * σ_α; σ_ele = 0.1 * σ_ϵ;
 σ_cal = Q_diode; σ_azi = Q_diode; σ_ele = Q_diode;
@@ -93,7 +88,7 @@ P0 = (10*pi/180)^2 * I((size(x0, 1) - 1)); # 10 deg. and 10 deg/sec 1-sigma unce
 xhist, Phist = mekf(x0,P0,W,V,rN,whist,yhist, dt, i, eclipse);
 
 
-@load "mekf_truth.jld2" # qtrue, btrue
+@load "mekf_truth.jld2" # qtrue, btrue, pos
 
 
 # Calculate error quaternions
@@ -127,17 +122,14 @@ display(plot(q0Plt, qiPlt, qjPlt, qkPlt, layout = (2,2), title = "Attitude"))
 eiPlt = plot(  (360/pi) * e[1,:], label = "Ei")
 eiPlt = plot!( (360/pi) * sqrt.(Phist[1,1,:]), color = :red, label = false) 
 eiPlt = plot!(-(360/pi) * sqrt.(Phist[1,1,:]), color = :red, label = false)
-# eiPlt = plot!(whist[1,:]*500, color = :purple, label = "W_x")
 
 ejPlt = plot(  (360/pi) * e[2,:], label = "Ej")
 ejPlt = plot!( (360/pi) * sqrt.(Phist[2,2,:]), color = :red, label = false) 
 ejPlt = plot!(-(360/pi) * sqrt.(Phist[2,2,:]), color = :red, label = false)
-# ejPlt = plot!(whist[2,:]*500, color = :purple, label = "W_y")
 
 ekPlt = plot(  (360/pi) * e[3,:], label = "Ek")
 ekPlt = plot!( (360/pi) * sqrt.(Phist[3,3,:]), color = :red, label = false) 
 ekPlt = plot!(-(360/pi) * sqrt.(Phist[3,3,:]), color = :red, label = false)
-# ekPlt = plot!(whist[3,:]*1000, color = :purple, label = "W_z")
 
 display(plot(eiPlt, ejPlt, ekPlt, layout = (3,1), title = "Attitude Error (deg)"))
 
@@ -174,14 +166,8 @@ cPlt2 = plot!(-2*sqrt.(Phist[8,8,:]), color = :red, label = false)
 cPlt3 = plot( xhist[10,:] .- calib_vals[3], color = :blue, label = false)
 cPlt3 = plot!( 2*sqrt.(Phist[9,9,:]), color = :red, label = false)
 cPlt3 = plot!(-2*sqrt.(Phist[9,9,:]), color = :red, label = false)
-
-# cPlt1 = plot( xhist[8,:], color = "red", label = false)
-# cPlt1 = hline!([calib_vals[1]], color = "red", label = false, linestyle = :dash)
-# cPlt2 = plot(xhist[9,:], color = "blue", label = false)
-# cPlt2 = hline!([calib_vals[2]], color = "blue", label = false, linestyle = :dash)
-# cPlt3 = plot(xhist[10,:], color = "green", label = false)
-# cPlt3 = hline!([calib_vals[3]], color = "green", label = false, linestyle = :dash)
 display(plot(cPlt1, cPlt2, cPlt3, layout = (3,1), title = "Calibration values"))
+# plot(xhist[8:(7+i),:]'); display(hline!(calib_vals, linestyle = :dash));
 
 
 
@@ -192,6 +178,8 @@ aPlt2 = hline!([αs[2]], color = "blue", label = false, linestyle = :dash)
 aPlt3 = plot(xhist[10+i,:], color = "green", label = false)
 aPlt3 = hline!([αs[3]], color = "green", label = false, linestyle = :dash)
 display(plot(aPlt1, aPlt2, aPlt3, layout = (3,1), title = "Azimuth Angles (α)"))
+# plot(xhist[(8+i):(7+2*i),:]'); display(hline!(αs, linestyle = :dash));
+
 
 ePlt1 = plot( xhist[8+2*i,:], color = "red", label = false)
 ePlt1 = hline!([ϵs[1]], color = "red", label = false, linestyle = :dash)
@@ -200,6 +188,4 @@ ePlt2 = hline!([ϵs[2]], color = "blue", label = false, linestyle = :dash)
 ePlt3 = plot(xhist[10+2*i,:], color = "green", label = false)
 ePlt3 = hline!([ϵs[3]], color = "green", label = false, linestyle = :dash)
 display(plot(ePlt1, ePlt2, ePlt3, layout = (3,1), title = "Elevation Angles (ϵ)"))
-
-
-# display(plot(cPlt, aPlt, ePlt, layout = (3,1), title = "Calibration Estimates"))
+# plot(xhist[(8+2*i):(7+3*i),:]'); display(hline!(ϵs, linestyle = :dash));

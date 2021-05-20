@@ -17,10 +17,12 @@ sat_len = 0.1; # m
 _J = ((1/12) * (sat_mass) * ((sat_len^2) + (sat_len^2)) * I(3)) / (dscale^2); # Should this be divided by dscale...? It *is* in meters
 dynamics_params = [_mu, _Re, _r0, _J]; # Used to propagate dynamics
 
+_E_am0 = 1367 # Irradiance of sunlight (TSI - visible & infrared), W/m^2 
+
 # SIMULATOR -------------------------------------------------------------------
 epc = Epoch(2019, 1, 1, 12, 0, 0, 0.0); # Initial time for sim
 dt = 1.0 / tscale;
-sim_length = (120.0 * 60.0) / tscale;   # Seconds (adjusted)
+sim_length = (80.0 * 60.0) / tscale;   # Seconds (adjusted)
 T = Int(sim_length / dt)                # Knot points (?)
 
 # INITIAL CONDITIONS ----------------------------------------------------------
