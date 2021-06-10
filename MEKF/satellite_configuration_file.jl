@@ -1,3 +1,5 @@
+# MAKE INTO DICTS (divide by scales outside of definition, etc...)
+
 using Random, Distributions # Used to generate random numbers for noise, photodiode values
 
 # OTHER ------------------------------------------------------------------------
@@ -17,20 +19,22 @@ sat_len = 0.1; # m
 _J = ((1/12) * (sat_mass) * ((sat_len^2) + (sat_len^2)) * I(3)) / (dscale^2); # Should this be divided by dscale...? It *is* in meters
 dynamics_params = [_mu, _Re, _r0, _J]; # Used to propagate dynamics
 
-_E_am0 = 1367 # Irradiance of sunlight (TSI - visible & infrared), W/m^2 
+_E_am0 = 1366.9 # Irradiance of sunlight (TSI - visible & infrared), W/m^2 
 
 # SIMULATOR -------------------------------------------------------------------
 epc = Epoch(2019, 1, 1, 12, 0, 0, 0.0); # Initial time for sim
 dt = 1.0 / tscale;
-sim_length = (80.0 * 60.0) / tscale;   # Seconds (adjusted)
+sim_length = (95.0 * 60.0) / tscale;   # Seconds (adjusted)  ~95 is one orbit 
 T = Int(sim_length / dt)                # Knot points (?)
 
 # INITIAL CONDITIONS ----------------------------------------------------------
 r = [1; 1; 1/2]; r = r / norm(r);       
 θ = pi/4;                               
 q0 =  [r * sin(θ/2); cos(θ/2)];         # Initial satellite orientation
-p0 = [0, _r0, 0];                       # Initial satellite position, m (adjusted)
-v0 = [_v0, 0, 0];                       # Initial satellite velocity, m/s (adjusted)
+p0 = [0, -_r0, 0];                       # Initial satellite position, m (adjusted)
+
+init_traj_angle = deg2rad(80)
+v0 = [_v0*cos(init_traj_angle), 0, _v0*sin(init_traj_angle)];                       # Initial satellite velocity, m/s (adjusted)
 w0 = [0.012, 0.02, 0.031] * tscale;     # Initial satellite angular velocity rad/sec (adjusted)
 β0 = deg2rad(2.0) * randn(3)            # Initial gyroscope bias, rad
 
