@@ -8,7 +8,7 @@ using SatelliteDynamics
 using ProgressMeter
 using EarthAlbedo
 
-# Random.seed!(38345)
+# Random.seed!(433434)
 
 include("mekf.jl"); 
 include("sun_measurement.jl")
@@ -69,8 +69,8 @@ cell_centers_ecef = get_albedo_cell_centers() #./ (1e6)
 
 i = num_diodes
 μ_c = sum(calib_vals) / i;
-σ_α = deg2rad(5); # 5 degrees
-σ_ϵ = deg2rad(5);
+σ_α = deg2rad(10); # 5 degrees
+σ_ϵ = deg2rad(10);
 σ_c = 0.1 * μ_c; # 10 percent
 
 α0 = αs .+ rand(Normal(0.0, σ_α), i)

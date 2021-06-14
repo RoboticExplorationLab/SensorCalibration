@@ -17,7 +17,7 @@ _v0 = sqrt(_mu*( (2/_r0) - (1/_a))); # Velocity for a stable orbit
 sat_mass = 1;  # kg
 sat_len = 0.1; # m
 _J = ((1/12) * (sat_mass) * ((sat_len^2) + (sat_len^2)) * I(3)) / (dscale^2); # Should this be divided by dscale...? It *is* in meters
-dynamics_params = [_mu, _Re, _r0, _J]; # Used to propagate dynamics
+dynamics_params = [_mu, _Re, _J]; # Used to propagate dynamics
 
 _E_am0 = 1366.9 # Irradiance of sunlight (TSI - visible & infrared), W/m^2 
 
@@ -33,7 +33,7 @@ r = [1; 1; 1/2]; r = r / norm(r);
 q0 =  [r * sin(θ/2); cos(θ/2)];         # Initial satellite orientation
 p0 = [0, -_r0, 0];                       # Initial satellite position, m (adjusted)
 
-init_traj_angle = deg2rad(80)
+init_traj_angle = deg2rad(0) #deg2rad(80)
 v0 = [_v0*cos(init_traj_angle), 0, _v0*sin(init_traj_angle)];                       # Initial satellite velocity, m/s (adjusted)
 w0 = [0.012, 0.02, 0.031] * tscale;     # Initial satellite angular velocity rad/sec (adjusted)
 β0 = deg2rad(2.0) * randn(3)            # Initial gyroscope bias, rad
