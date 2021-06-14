@@ -74,7 +74,6 @@ function dynamics(x, param, t)
     return xdot
 end 
 
-# TODO: Add in Albedo
 function measurement(x, t)  
     """
         Generates system measurements 
@@ -90,7 +89,7 @@ function measurement(x, t)
 
     pos = x[1:3] * dscale        # Satellite vector in Inertial frame 
     sN = sun_position(t)         # Earth-Sun vector in Inertial frame e
-    bN = IGRF13(pos, t)          # Mag vector in Inertial frame      should it be negative...
+    bN = IGRF13(pos, t)          # Mag vector in Inertial frame
 
 
     # TODO  -    there is an ERROR in eclipse_conical (likely dropped off a sign in C = acos(-dot...)) so I am adding a negative here for now
@@ -99,12 +98,12 @@ function measurement(x, t)
     temp_sun = sN;
 
     sN = sN - pos                # Sat-Sun vector in Inertial fram
-    albedo_matrix, unions = EarthAlbedo.albedo(pos, sN, refl)
+    albedo_matrix, unions = albedo(pos, sN, refl)
+
 
     sN = ecl * (sN / norm(sN)) # Make unit, zero out if sun is blocked 
     bN = (bN / norm(bN))       # Make unit
 
-    # TODO verify noise magnitude
     η_sun = get_noise_matrix(σ_η_sun, dt)
     η_mag = get_noise_matrix(σ_η_mag, dt)
 
@@ -116,12 +115,10 @@ function measurement(x, t)
 
     for i = 1:num_diodes
         surface_normal = [cos(ϵs[i])*cos(αs[i]) cos(ϵs[i])*sin(αs[i]) sin(ϵs[i])]     # Photodiode surface normal 
-        diode_albedo = get_diode_albedo_local(albedo_matrix, surface_normal, pos)
-        if (diode_albedo / _E_am0) > 1.0
-            error("Somehow more light is being reflected than is generated!")
-        end
-
-        current = (calib_vals[i]  * surface_normal * sB) .+ (calib_vals[i] * diode_albedo / _E_am0) .+ σ_η_cur * randn() # Calculate current, including noise and Earth's albedo 
+       
+        diode_albedo = get_diode_albedo_local(albedo_matrix, surface_normal, (pos / dscale))  # Scale position to match cell_centers_ecef
+ 
+        current = (calib_vals[i]  * surface_normal * sB) .+ (calib_vals[i] * diode_albedo / _E_am0) #.+ σ_η_cur * randn() # Calculate current, including noise and Earth's albedo 
         current_vals[i] = current[1] * ecl  # Scale by eclipse factor 
         diode_albedos[i] = calib_vals[i] * (diode_albedo/ _E_am0)
     end
@@ -129,8 +126,10 @@ function measurement(x, t)
     # NOTE should I do this before or after noise?   ->   Probably before...?
     current_vals[current_vals .< 0] .= 0 # Photodiodes don't generate negative current
 
+    current_vals = current_vals * tscale; # Amps = Coul/sec, so units need to be adjusted (?)
+
     Y =  [sB[:]; bB[:]; sN[:]; bN[:]; ecl; current_vals[:]]
-    return Y, diode_albedos[:], reshape(unions, length(unions)), temp_sun[:]
+    return Y, diode_albedos[:]#, reshape(unions, length(unions)), temp_sun[:]
 end
 
 function get_noise_matrix(σ, dt)
@@ -160,20 +159,21 @@ function generate_data(x0, T, dt)
     X[:,1] = x0
 
     diode_albedos = zeros(num_diodes, T)
-    unions = zeros(51840, T)
-    sun = zeros(3,T)
+    # unions = zeros(51840, T)
+    # sun = zeros(3,T)
 
     @showprogress "Generating Data" for i = 1:(T-1)
+    # for i = 1:(T-1)
         t = (i - 1) * dt  
         X[:, i + 1] = rk4(dynamics, dynamics_params, X[:,i], dt, t)
-        Y[:, i], diode_albedos[:,i], unions[:,i], sun[:,i] = measurement(X[:,i], t)
-        # Y[:, i] = measurement(X[:,i], t)
+        # Y[:, i], diode_albedos[:,i], unions[:,i], sun[:,i] = measurement(X[:,i], t)
+        Y[:, i], diode_albedos[:,i] = measurement(X[:,i], t)
     end
-    Y[:,T], diode_albedos[:,T], unions[:,T], sun[:,T] = measurement(X[:,T], (T-1)*dt)
-    # Y[:,T] = measurement(X[:,T], (T-1)*dt)
+    # Y[:,T], diode_albedos[:,T], unions[:,T], sun[:,T] = measurement(X[:,T], (T-1)*dt)
+    Y[:,T], diode_albedos[:,T] = measurement(X[:,T], (T-1)*dt)
 
     X[11:13,:] = X[11:13,:] .+ X[14:16,:] # Add in bias to the omega vectors (Note that this is done here so as to not interfere with the dynamics)
-    return X, Y, diode_albedos, unions, sun
+    return X, Y, diode_albedos#, unions, sun
 end
 
 function get_diode_albedo_local(albedo_matrix, surface_normal, sat_pos)
@@ -211,14 +211,16 @@ function get_diode_albedo_local(albedo_matrix, surface_normal, sat_pos)
     return diode_albedo
 end
 
+
 # Load in reflectivity data as a struct 
 cell_centers_ecef = get_albedo_cell_centers() ./ dscale
 refl_dict = matread("refl.mat")
 refl = refl_struct(refl_dict["data"], refl_dict["type"], refl_dict["start_time"], refl_dict["stop_time"])
 
+
 ###### PROPAGATE DYNAMICS #####
-states, meas, albedos, unions, sun = generate_data(x0, T, dt)
-# states, meas = generate_data(x0, T, dt)  # OR return as a dict...?
+# states, meas, albedos, unions, sun = generate_data(x0, T, dt)
+states, meas, albedos = generate_data(x0, T, dt)  # OR return as a dict...?
 println("Finished propagating dynamics")
 
 
@@ -248,8 +250,10 @@ biases = states[14:16,:] / tscale
 dt = dt * tscale
 noiseValues = (σ_η_sun = σ_η_sun, σ_η_mag = σ_η_mag, σ_η_cur = σ_η_cur)
 
-rB1hist = sB_hist; rB2hist = bB_hist; rN1 = sN_hist; rN2 = bN_hist; eclipse = ecl_hist; Ihist = I_hist
+rB1hist = sB_hist; rB2hist = bB_hist; rN1 = sN_hist; rN2 = bN_hist; eclipse = ecl_hist; 
+Ihist = I_hist / tscale
 pos = states[1:3,:] * dscale
+
 
 
 # Adjust to multiple structs: (sensors, environment, state, other, etc...?)
@@ -262,14 +266,15 @@ btrue = biases
 @save "mekf_truth.jld2" qtrue btrue #### POS HERE OR BEFORE?
 println("Done Saving")
 
-##### PLOTS #####
+##### PLOTS #####   
+# TODO FIX AXES LABELS, etc...
 display(plot(states[1:3,:]', title = "Positions"))
 display(plot(sN_hist', title = "Sun Vector (N)"))
 display(plot(bN_hist', title = "Mag Vector (N)"))
-display(plot(I_hist', title = "Diode Currents (UNKNOWN UNITS FOR NOW)"))
+display(plot(I_hist', title = "Diode Currents (Scaled Amps?)"))
 
-display(plot(states[14:16,:]', title = "Biases"))
-display(plot(states[11:13,:]', title = "W"))
+display(plot(biases', title = "Biases"))
+display(plot(whist', title = "W"))
 
 display(plot(albedos', title = "Albedos (% of AM_0)"))
 

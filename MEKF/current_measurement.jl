@@ -1,4 +1,4 @@
-function current_measurement(x, sN, i, ecl)
+function current_measurement(x, sN, i, ecl, pos, time)
     # Generates the "measured" current values from the sun vector
     #      (What our measurement would be given our sun vector)
     # Inputs:
@@ -38,13 +38,44 @@ function current_measurement(x, sN, i, ecl)
 
     H = [∂θ ∂β Diagonal(∂C) Diagonal(∂α) Diagonal(∂ϵ)] # [i x 6 + 3i]
 
-    I_meas = c .* (n * sB) .+ 0; # Measured current, NO ALBEDO
+
+    I_meas = c .* (n * sB) .+ 0; # Measured current, ALBEDO added in later
+
+
+    
+    #### ACCOUNT FOR ALBEDO... SOMEHOW - do I use pos/epc? Or just use unscaled sN?
+    # pos = pos .+ randn(3) * pos * 0.001  # Make it an estimate...?
+
+    sN_unscaled = sun_position(time) - pos;
+
+    albedo_matrix, ignore = albedo(pos, sN_unscaled, refl)
+
+    diode_albedos = zeros(num_diodes)
+
+    for i = 1:num_diodes
+        # Below is just the rows of n
+
+        surface_normal = [cos(ϵ[i])*cos(α[i]) cos(ϵ[i])*sin(α[i]) sin(ϵ[i])]     # Photodiode surface normal 
+
+        diode_albedo = get_diode_albedo_local(albedo_matrix, surface_normal, pos)
+
+        diode_albedo = c[i] * diode_albedo / _E_am0;
+
+        I_meas[i] = I_meas[i] + diode_albedo
+        diode_albedos[i] = diode_albedo
+    end
+
+
+    #####################################
+    
+
+    
 
     # Account for eclipses
     I_meas *= ecl
-    I_meas[I_meas .≤ 0] .= 0  # Photodiodes don't generate negative current
+    I_meas[I_meas .< 0] .= 0  # Photodiodes don't generate negative current
     H[I_meas .≤ 0, :] .= 0    # ^ To match the above
     y = I_meas[:]     # [i x 1]
 
-    return y, H
+    return y, H, diode_albedos[:]
 end

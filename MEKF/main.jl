@@ -3,9 +3,12 @@ using Plots
 using MAT, LinearAlgebra, ForwardDiff
 using JLD2
 using Random, Distributions
-using BlockDiagonals           
+using BlockDiagonals          
+using SatelliteDynamics 
+using ProgressMeter
+using EarthAlbedo
 
-# Random.seed!(384345)
+# Random.seed!(38345)
 
 include("mekf.jl"); 
 include("sun_measurement.jl")
@@ -16,7 +19,53 @@ include("prediction.jl")
 include("triad.jl")
 include("rotationFunctions.jl")
 
-@load "mekf_data.jld2" # rB1hist rB2hist rN1 rN2 Ihist whist num_diodes dt calib_vals αs ϵs eclipse
+@load "mekf_data.jld2" # rB1hist rB2hist rN1 rN2 Ihist whist num_diodes dt calib_vals αs ϵs eclipse + MORE
+
+
+_E_am0 = 1366.9 # 
+
+refl_dict = matread("refl.mat")
+refl = refl_struct(refl_dict["data"], refl_dict["type"], refl_dict["start_time"], refl_dict["stop_time"])
+
+
+# SHOULD I MOVE THIS TO A SHARED FUNCTIONS FILE?
+function get_diode_albedo_local(albedo_matrix, surface_normal, sat_pos)
+    """ 
+        Estimates the effect of Earth's albedo on a specific photodiode (by using the surface normal of that diode)
+            = cell_albedo * surface_normal^T * r_g, with r_g as a unit vector in the direction of the grid point on Earth
+
+        Arguments:
+        - albedo_matrix: Albedo values for each cell on the Earth's surface         | [num_lat x num_lon] 
+        - surface_normal: Photodiode surface normal                                 | [3,]
+        - sat_pos: Cartesian position of satellite                                  | [3,]
+
+        Returns:
+        - diode_albedo: Total effect of albedo on specified photodiode              | Scalar
+    """    
+    cell_albedos = zeros(size(albedo_matrix))
+
+    rows, cols = size(albedo_matrix)
+    diode_albedo = 0.0
+    for r = 1:1:rows
+        for c = 1:1:cols
+            if albedo_matrix[r,c] != 0
+                r_g = cell_centers_ecef[r,c,:] - sat_pos # Distance from satellite to cell center
+                r_g = r_g / norm(r_g)  # Make unit
+
+                cell_albedo = (albedo_matrix[r,c] * (surface_normal * r_g))[1]
+
+                if cell_albedo > 0.0    # Can't be negative
+                    diode_albedo = diode_albedo + cell_albedo 
+                end
+            end
+        end
+    end
+    
+    return diode_albedo
+end
+
+cell_centers_ecef = get_albedo_cell_centers() #./ (1e6)
+#################
 
 i = num_diodes
 μ_c = sum(calib_vals) / i;
@@ -85,8 +134,9 @@ x0 = [q0; β0; c0; α0; ϵ0]; # Initialize with no bias, c=α=ϵ=rand, [7 x 3i]
 # P0 = diagm(p)
 P0 = (10*pi/180)^2 * I((size(x0, 1) - 1)); # 10 deg. and 10 deg/sec 1-sigma uncertainty + quaternions use an extra variable, so we subtract off
 
-xhist, Phist = mekf(x0,P0,W,V,rN,whist,yhist, dt, i, eclipse);
-
+println("Beginning MEKF")
+xhist, Phist, dhist = mekf(x0, P0, W, V, rN, whist, yhist, dt, i, eclipse, pos, epc);
+println("Finished MEKF")
 
 @load "mekf_truth.jld2" # qtrue, btrue, pos
 
@@ -96,7 +146,6 @@ e = zeros(size(qtrue));
 for k = 1:size(qtrue,2)
     e[:,k] = qmult(qconj(qtrue[:,k]), xhist[1:4,k]); 
 end
-
 
 
 
@@ -189,3 +238,13 @@ ePlt3 = plot(xhist[10+2*i,:], color = "green", label = false)
 ePlt3 = hline!([ϵs[3]], color = "green", label = false, linestyle = :dash)
 display(plot(ePlt1, ePlt2, ePlt3, layout = (3,1), title = "Elevation Angles (ϵ)"))
 # plot(xhist[(8+2*i):(7+3*i),:]'); display(hline!(ϵs, linestyle = :dash));
+
+display(plot(dhist', ylim = [0.0, 0.32], title = "Albedo Estimate"))
+
+eError = zeros(6, 5700);
+initErrors = ones(6, 5700);
+for j = 1:6
+    eError[j,:] = abs.((xhist[(7+j+2*i),:] .- ϵs[j]) ./ ϵs[j]);
+    initErrors[j,:] = ones(5700) * abs.( (xhist[(7+j+2*i),1] - ϵs[j]) / ϵs[j]);
+end
+plot(eError'); plot!(initErrors', linestyle = :dash, title = "Error relative to initial Error")
