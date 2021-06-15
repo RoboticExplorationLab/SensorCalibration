@@ -1,265 +1,316 @@
-using Pkg
-using Plots
+using Pkg, Plots
+
 cd(@__DIR__)
-Pkg.activate(".")
+Pkg.activate(".")  # Load in the project/manifest file stuff to get right versions
 Pkg.instantiate()
 
-using DifferentialEquations
-using LinearAlgebra
-using Random, Distributions
-using Attitude, SatelliteDynamics
-using JLD2
-include("mag_field.jl")
+using SatelliteDynamics     # for mag_field.jl, Geod/ECEF conversions
+using StaticArrays          # for SVectors, used for speed (?)
+using Random                # For generating random numbers (e.g., noise)
+using JLD2                  # For saving 
+using LinearAlgebra         # For lots of linear algebra like norm, etc...
+using MAT                   # For loading .mat files (could be done with matlab?)
+using ProgressMeter         # Makes the cool progress meter for generating data
+using EarthAlbedo           # For determining effect of Earth's Albedo
 
-# Random.seed!(2534)
+# Random.seed!(623455)
+debug_mode = false  # Generates and returns additional data for plotting, verification, etc.
 
-dscale = 1e6
-tscale = 3600/5
+include("mag_field.jl")              # From Kevin, used for IGRF13 
+include("rotationFunctions.jl")      # Includes common functions for dealing with quaternions
+include("satellite_configuration_file.jl")   # Includes satellite parameters
 
-# Constants
-_Re = 6378136.3 / dscale            # Radius of the earth 
-_mu = (tscale^2)*(3.9860044188)*(10^(14)) / (dscale ^ 3);  # (m^3/s^2) Standard Gravitational Parameter
-_r0 = (550000 / dscale) + _Re       # Distance from two center of masses
-_a = _r0                            # Semi-major axis of (elliptical) orbit (circular orbit if a = r0)
-_v0 = sqrt(_mu*( (2/_r0) - (1/_a))) 
+function rk4(f, params, x_n, h, t_n)
+    """ 
+        RK4, but with no external force, and parameters passed in instead of u.
+            (Based off of code from Kevin)
+    """
+    x_n = SVector{num_states}(x_n)
 
-# Initial Quaternion
-r = [1; 1; 1/2]; r = r / norm(r);
-θ = pi/4;
-q0 =  [r * sin(θ/2); cos(θ/2)];
+    k1 = h*f(x_n, params, t_n)
+    k2 = h*f(x_n + k1/2, params, t_n + h/2)
+    k3 = h*f(x_n + k2/2, params, t_n + h/2)
+    k4 = h*f(x_n + k3, params, t_n + h)
 
-# Initial position, velocity, and angular velocity 
-p0 = [_r0, 0, 0];
-v0 = [0, _v0, 0];
-w0 = [0.0001, 0.0002, 0.0003] * tscale;
-
-β0 = w0 * 0.1;
-
-x0 = [p0; v0; q0; w0];
-param = [_mu, _Re, _r0]; # Parameters
-
-
-# Simulator Parameters
-orbitTime = ((2*pi*_r0)/(_v0));
-day = 24.0 * 60 * 60 / tscale;
-tspan = (0, 4 * orbitTime) 
-saveRate = 1 / tscale;    # May need a higher save rate...
-
-
-# State Propagation
-function qmult(q, p)
-    # Performs quaternion multiplication (Hamilton product) 
-    #   (Quaternions are scalar last)
-
-    q = q[:]
-    p = p[:]
-    
-    q0, p0 = q[4], p[4]
-    q⃗ = q[1:3]
-    p⃗ = p[1:3]
-
-    r0 = q0 * p0 - dot(q⃗, p⃗)
-    r⃗ = (q0 * p⃗) + (p0 * q⃗) + cross(q⃗, p⃗)
-
-    r = [r⃗; r0]
-    return r
+    return (x_n + (1/6)*(k1 + 2*k2 + 2*k3 + k4))
 end
 
-function dynamics(xdot, x, p, t)
-    # x = [px py pz vx vy vz quat(scalar last) wx wy wz] + bias terms
+function dynamics(x, param, t) 
+    """ 
+        Propagates the dynamics of the system. 
+            Note that everything is in adjusted units, not necessarily m/s
 
-    mu, Re, r = p
-    xdot[1:3] = x[4:6]; 
+        Arguments:
+            - x: Current state [ [px, py, pz], [vx, vy, vz], [q⃗, q0], [wx, wy, wz], [βx, βy, βz] ]              | [16,]
+            - param: Parameters used to propagate dynamics. Includes μ (standard gravitational parameter),
+                        Re (mean radius of Earth), and J (inertia matrix for the satellite)                     | [3,]
 
-    normr = norm(x[1:3])
-    a = (-mu / (normr^3)) * x[1:3]
-    xdot[4:6] = a 
+        Returns:
+            - xdot: Derivative of state         | [16,]
 
-    q = x[7:10]
+    """
+    mu, Re, J = param   
+    xdot = zeros(size(x))
 
-    w = x[11:13]
-
-    xdot[7:10] = 0.5 * qmult(q, [w; 0])
-
-    J = [1 0 0; 0 2 0; 0 0 3];   # # # # # # # PLACEHOLDER
-    xdot[11:13] = ((J^(-1))) * cross(-w, (J*w));
-
-end
-
-
-prob = ODEProblem(dynamics, x0, tspan, param);
-sol = solve(prob, Vern7(), reltol = 1e-8, saveat = saveRate);
-
-epc = Epoch(2019, 1, 1, 12, 0, 0, 0.0) # initial time for sim
-
-pos = plot( sol[1,:], label = "x")
-pos = plot!(sol[2,:], label = "y")
-pos = plot!(sol[3,:], label = "z")
-display(plot(pos, title = "Position"))
-
-
-quat = plot( sol[7,:], label = "i")
-quat = plot!(sol[8,:], label = "j")
-quat = plot!(sol[9,:], label = "k")
-quat = plot!(sol[10,:], label = "Scalar")
-display(plot(quat, title = "Quaternions"))
-
-
-ang = plot( sol[11,:], label = "wx")
-ang = plot!(sol[12,:], label = "wy")
-ang = plot!(sol[13,:], label = "wz")
-display(plot(ang, title = "Angle"))
-
-
-states = sol[:,:];
-
-
-# Measurement
-function hat(x)
-    x = x[:];
-    h = [0     -x[3]  x[2];
-         x[3]    0   -x[1];
-         -x[2]  x[1]    0];
-end
-
-function quat2rot(quat)
-    # Scalar-last quaternions
-    
-    q = quat[:];
-    
-    s = norm(q)^(-2);
-    qr = q[4];
-    qi = q[1];
-    qj = q[2];
-    qk = q[3];
-    
-    R = [(1 - 2*s*(qj^2 + qk^2)) (2*s*(qi*qj - qk*qr)) (2*s*(qi*qk + qj*qr));
-        (2*s*(qi*qj + qk*qr))   (1-2*s*(qi^2+qk^2))   (2*s*(qj*qk - qi*qr));
-        (2*s*(qi*qk - qj*qr))   (2*s*(qj*qk+qi*qr))   (1-2*s*(qi^2 + qj^2))];
-    
-end
-
-function g(x, t) # Epc has already been added to t
-    pos = x[1:3];
-    q = x[7:10];
-
-    qVec = q[1:3];
-    qSca = q[4];
-    R = I(3) + 2 * hat(qVec) * (qSca * I(3) + hat(qVec)); # R N->B   
-    R = transpose(R); # R B->N
-
-    sN_current = sun_position(t)   
-    bN_current = IGRF13(pos*dscale, t)
-    sN_current = sN_current / norm(sN_current)
-    bN_current = bN_current / norm(bN_current)
-
-
-    sB = R * sN_current + 0.005 * randn(3);
-    bB = R * bN_current + 0.01 * randn(3);
-
-    Is = zeros(numDiodes)
-
-    for i = 1:numDiodes
-
-        n = [cos(ϵs[i])*cos(αs[i]) cos(ϵs[i])*sin(αs[i]) sin(ϵs[i])]
-
-        Ii = cVals[i] * n * sB .+ 0 .+ 0; # η = 0, no albedo yet
-
-        Is[i] = Ii[1]
+    if norm(x[1:3]) < Re # Check if satellite crashes into Earth
+        error("Impact!")
     end
 
-    Y = [sB[:]; bB[:]; Is[:]];
-    return Y, sN_current, bN_current
+    xdot[1:3] = x[4:6]  # dot[px, py, pz] = [vx, vy, vz]
+
+    xdot[4:6] = (-mu / (norm(x[1:3])^3)) * x[1:3]  # dot[vx, vy, vz] = a⃗ = -mu r̂ / ||r||^3
+
+    w = x[11:13]
+    xdot[7:10] = 0.5 * qmult(x[7:10], [w; 0])   # dot[q] = 0.5 q ⋅ [w; 0]  (Scalar last quaternions!)
+
+    xdot[11:13] = (J^(-1)) * cross(-w, (J*w))   # dot[w] = J_inv * (-w x Jw)
+
+    xdot[14:16] = σ_β * randn(3)                # bias is just a random walk, so β = β + η
+
+    return xdot
+end 
+
+# NOTE that currently there is an error in eclipse_conical so we have to negate pos until it is fixed
+function measurement(x, t)  
+    """
+        Generates system measurements.  
+
+        Arguments:
+          - x: [ [px, py, pz], [vx, vy, vz], [q⃗, q0], [wx, wy, wz], [βx, βy, βz] ]     |  [16,]
+          - t: current time since start (adjusted units)                               |  scalar
+
+        Returns:
+          - Y: Array containing all the system measurements
+                (sun vector in body frame, mag field in body frame, sun and mag vectors in Newtonian frame,
+                 whether or not the satellite is being eclipsed, and the currents generated by each diode)     | [13 + i, ]
+    """
+
+    t = epc + (t * tscale)
+    q_vec = x[7:9];  q_sca = x[10];
+
+    R_B2N = I(3) + 2 * hat(q_vec) * (q_sca * I(3) + hat(q_vec)); # Equation from Kevin, quaternion -> DCM (eq 39)
+    R_N2B = transpose(R_B2N)
+
+    pos = x[1:3] * dscale        # Satellite vector in Inertial frame 
+    sN = sun_position(t)         # Earth-Sun vector in Inertial frame e
+    bN = IGRF13(pos, t)          # Mag vector in Inertial frame
+
+
+    # TODO  -    there is an ERROR in eclipse_conical (likely dropped off a sign in C = acos(-dot...)) so I am adding a negative here for now
+    ecl = eclipse_conical(-pos, sN) # Determine if there is an eclipse (∈ [0, 1])
+
+    sN = sN - pos                # Sat-Sun vector in Inertial fram
+    albedo_matrix, unions = albedo(pos, sN, refl)
+
+    sN = ecl * (sN / norm(sN)) # Make unit, zero out if sun is blocked 
+    bN = (bN / norm(bN))       # Make unit
+
+    η_sun = get_noise_matrix(σ_η_sun, dt)
+    η_mag = get_noise_matrix(σ_η_mag, dt)
+
+    sB = η_sun * (R_N2B * sN) # (noisy) Sun vector in body frame
+    bB = η_mag * (R_N2B * bN) # (noisy) Mag vector in body frame
+
+    current_vals = zeros(num_diodes) # Currents being generated by each photodiode
+    diode_albedos = zeros(num_diodes)
+
+    for i = 1:num_diodes
+        surface_normal = [cos(ϵs[i])*cos(αs[i]) cos(ϵs[i])*sin(αs[i]) sin(ϵs[i])]     # Photodiode surface normal 
+       
+        diode_albedo = get_diode_albedo_local(albedo_matrix, surface_normal, (pos / dscale))  # Scale position to match cell_centers_ecef
+ 
+        current = (calib_vals[i]  * surface_normal * sB) .+ (calib_vals[i] * diode_albedo / _E_am0) .+ σ_η_cur * randn() # Calculate current, including noise and Earth's albedo 
+        current_vals[i] = current[1] * ecl  # Scale by eclipse factor 
+        diode_albedos[i] = calib_vals[i] * (diode_albedo/ _E_am0)
+    end
+
+    # NOTE should I do this before or after noise?   ->   Probably before...?
+    current_vals[current_vals .< 0] .= 0 # Photodiodes don't generate negative current
+
+    current_vals = current_vals * tscale; # Amps = Coul/sec, so units need to be adjusted (?)
+
+    Y =  [sB[:]; bB[:]; sN[:]; bN[:]; ecl; current_vals[:]]
     
+    if debug_mode
+        temp_sun = sun_position(t) # Sun position, unscaled
+        return Y, diode_albedos[:], reshape(unions, length(unions)), temp_sun[:]
+    else
+        return Y
+    end
 end
 
+function get_noise_matrix(σ, dt)
+    """
+        Generates a [3 x 3] noise rotation matrix given a standard deviation 
+            First generates a noise vector and then converts that into a rotation matrix
+            (Note that if the standard deviation provided is 0, the identity matrix is returned)
+    """
+    if σ != 0.0
+        η_vec = σ * randn(3) # Generate a vector 
+        skew = hat(η_vec)
+        norm_η = norm(η_vec)
 
-numDiodes = 3;
-cVals = 1 .+ 0.2 * randn(numDiodes);
-
-ϵs = (pi/4) .+ 0.1 * randn(numDiodes);
-#   Elevation ∈ [0, π/2]
-idxs = (ϵs .> (pi/2));
-ϵs[idxs] .= (pi/2);
-idxs = (ϵs .< 0);
-ϵs[idxs] .= 0
-
-
-# Azimuth ∈ [0, 2π)
-αs = (pi/2) .+ 0.2 * randn(numDiodes);
-idxs = (αs .>= (2*pi));
-αs[idxs] .= (2*pi - 0.1);
-idxs = (αs .< 0);
-αs[idxs] .= 0
-
-
-yhist = zeros((6 + numDiodes), size(states,2))
-
-
-# sN_c = [  0.6692628932588212;  # Manchesters
-#         -0.681848889145605;
-#         0.2952444276827865];
-
-# bN_c = [  0.26270092455049937;
-#         -0.7082385474829961;
-#         -0.6552758076562027];
-
-# sN = [0.19126880387025275; # Averaged
-#      -0.9005430099234119; 
-#      -0.3904331780119909];
-
-# bN = [0.28322329459216955;
-#      -0.04528518125275634;  
-#       0.9574935528139525];
-
-
-sN = zeros(3, size(states,2))
-bN = zeros(3, size(states,2))
-dt = saveRate
-
-for i = 1:size(states,2)
-    t = dt * (i-1);
-    t_current = epc + (t * tscale)
-    yhist[:,i], sN[:,i], bN[:,i] = g(states[:,i], t_current)
+        R = (I(3) + (skew/norm_η)*sin(norm_η*dt) + ((skew/norm_η)^2)*(1 - cos(norm_η*dt))); # Rodrigues for matrix exponential (?)
+    else
+        R = I(3)
+    end
+    
+    return R
 end
 
+function generate_data(x0, T, dt)
+    """
+        Propagates the system dynamics forward for a specified number of points and updates measurment values.
+        
+        Arguments:
+            - x0: Initial state values [ [px, py, pz], [vx, vy, vz], [q⃗, q0], [wx, wy, wz], [βx, βy, βz] ]    | [16,]
+            - T: Number of steps to propagate the dynamics for 
 
-b1 = rand(Normal(β0[1], 0.1 * β0[1]), size(yhist,2))'
-b2 = rand(Normal(β0[2], 0.1 * β0[2]), size(yhist,2))'
-b3 = rand(Normal(β0[3], 0.1 * β0[3]), size(yhist,2))'
+        Returns:
+            - X: History of state values
+            - Y: History of measurement values
+    """
 
-biases = [b1; b2; b3];
-whist = (states[11:13,:]+ biases)/tscale   # Not sure if i added bias in correctly. Should I just do it here...?
-biases = biases / tscale
-dt = saveRate * tscale;
+    if debug_mode
+        X = zeros(num_states, T)
+        Y = zeros(num_meas, T)
+        X[:,1] = x0
+        diode_albedos = zeros(num_diodes, T)
+        unions = zeros(51840, T)
+        sun = zeros(3,T)
 
-rB1hist = yhist[1:3,:]
-rB2hist = yhist[4:6,:]
-Ihist = yhist[7:end,:]
+        @showprogress "Generating Data" for i = 1:(T-1)
+            t = (i - 1) * dt  
+            X[:, i + 1] = rk4(dynamics, dynamics_params, X[:,i], dt, t)
+            Y[:, i], diode_albedos[:,i], unions[:,i], sun[:,i] = measurement(X[:,i], t)
+        end
+        Y[:,T], diode_albedos[:,T], unions[:,T], sun[:,T] = measurement(X[:,T], (T-1)*dt)
 
-iPlt = plot( yhist[7,:])
-iPlt = plot!(yhist[8,:])
-iPlt = plot!(yhist[9,:])
-display(plot(iPlt, title = "Measured Current"))
+        X[11:13,:] = X[11:13,:] .+ X[14:16,:] # Add in bias to the omega vectors (Note that this is done here so as to not interfere with the dynamics)
+        return X, Y, diode_albedos, unions, sun
+    else
+        X = zeros(num_states, T)
+        Y = zeros(num_meas, T)
+        X[:,1] = x0
 
-rPlt = plot( sN[1,:])
-rPlt = plot!(sN[2,:])
-rPlt = plot!(sN[3,:])
-display(plot(rPlt, title = "Sun vector (N)"))
+        @showprogress "Generating Data" for i = 1:(T-1)
+            t = (i - 1) * dt  
+            X[:, i + 1] = rk4(dynamics, dynamics_params, X[:,i], dt, t)
+            Y[:, i] = measurement(X[:,i], t)
+        end
+        Y[:,T] = measurement(X[:,T], (T-1)*dt)
 
-rPlt = plot( bN[1,:])
-rPlt = plot!(bN[2,:])
-rPlt = plot!(bN[3,:])
-display(plot(rPlt, title = "Other vector (N)"))
+        X[11:13,:] = X[11:13,:] .+ X[14:16,:] # Add in bias to the omega vectors (Note that this is done here so as to not interfere with the dynamics)
+        return X, Y
+    end
+end
 
-rN1 = sN;
-rN2 = bN;
+function get_diode_albedo_local(albedo_matrix, surface_normal, sat_pos)
+    """ 
+        Estimates the effect of Earth's albedo on a specific photodiode (by using the surface normal of that diode)
+            = cell_albedo * surface_normal^T * r_g, with r_g as a unit vector in the direction of the grid point on Earth
 
-@save "mekf_data.jld2" rB1hist rB2hist rN1 rN2 Ihist whist numDiodes dt cVals αs ϵs 
+        Arguments:
+        - albedo_matrix: Albedo values for each cell on the Earth's surface         | [num_lat x num_lon] 
+        - surface_normal: Photodiode surface normal                                 | [3,]
+        - sat_pos: Cartesian position of satellite                                  | [3,]
+
+        Returns:
+        - diode_albedo: Total effect of albedo on specified photodiode              | Scalar
+    """    
+    cell_albedos = zeros(size(albedo_matrix))
+
+    rows, cols = size(albedo_matrix)
+    diode_albedo = 0.0
+    for r = 1:1:rows
+        for c = 1:1:cols
+            if albedo_matrix[r,c] != 0
+                r_g = cell_centers_ecef[r,c,:] - sat_pos # Distance from satellite to cell center
+                r_g = r_g / norm(r_g)  # Make unit
+
+                cell_albedo = (albedo_matrix[r,c] * (surface_normal * r_g))[1]
+
+                if cell_albedo > 0.0    # Can't be negative
+                    diode_albedo = diode_albedo + cell_albedo 
+                end
+            end
+        end
+    end
+    
+    return diode_albedo
+end
+
+cell_centers_ecef = get_albedo_cell_centers() ./ dscale
+
+# Load in reflectivity data as a struct 
+#   (Note that the 'refl.mat' file contains 'data', 'type', 'start_time', and 'stop_time' and is simply 
+#       the MATLAB converted TOMS data from https://bhanderi.dk/downloads/ (the averaged data includes a range of times in the title))
+
+# refl_dict = matread("../../Earth_Albedo_Model/Processed_Data/tomsdata2005/2005/ga050101-051231.mat")
+refl_dict = matread("refl.mat") # Same as ^ but saved in local directory
+refl = refl_struct(refl_dict["data"], refl_dict["type"], refl_dict["start_time"], refl_dict["stop_time"])
+println("Loaded in reflectivity data")
+
+
+###### PROPAGATE DYNAMICS #####
+if debug_mode
+    states, meas, albedos, unions, sun = generate_data(x0, T, dt)
+else
+    states, meas = generate_data(x0, T, dt)  
+end
+println("Finished propagating dynamics")
+
+
+##### GENERATE MEASUREMENTS #####
+# History of respective values 
+sB_hist = zeros(3, T)
+bB_hist = zeros(3, T)
+I_hist  = zeros(num_diodes, T)
+sN_hist = zeros(3, T) 
+bN_hist = zeros(3, T) 
+ecl_hist= zeros(T)    
+
+for i = 1:T 
+    sB_hist[:,i] = meas[1:3,i] 
+    bB_hist[:,i] = meas[4:6,i] 
+    sN_hist[:,i] = meas[7:9,i] 
+    bN_hist[:,i] = meas[10:12,i]  
+    ecl_hist[i]  = meas[13,i]
+    I_hist[:,i] = meas[14:(13+num_diodes),i]
+end
+println("Finished splitting measurements")
+
+
+##### SAVE DATA #####
+whist = states[11:13,:] / tscale 
+biases = states[14:16,:] / tscale
+dt = dt * tscale
+noiseValues = (σ_η_sun = σ_η_sun, σ_η_mag = σ_η_mag, σ_η_cur = σ_η_cur)
+
+rB1hist = sB_hist; rB2hist = bB_hist; rN1 = sN_hist; rN2 = bN_hist; eclipse = ecl_hist; 
+Ihist = I_hist / tscale
+pos = states[1:3,:] * dscale
 
 qtrue = states[7:10,:]
-btrue = biases;
+btrue = biases
 
-@save "mekf_truth.jld2" qtrue btrue
+@save "mekf_data.jld2" rB1hist rB2hist rN1 rN2 Ihist whist num_diodes dt calib_vals αs ϵs eclipse noiseValues pos epc
+@save "mekf_truth.jld2" qtrue btrue 
+println("Done Saving")
 
-println("finished")
+
+##### PLOTS #####   
+display(plot(states[1:3,:]', xlabel = "Time ($dt s)", ylabel = "Position ($dscale m)", labels = ["x" "y" "z"], title = "Positions"))
+display(plot(sN_hist', labels = ["x" "y" "z"], xlabel = "Time ($dt s)", ylabel = "Magnitude", title = "Unit Sun Vector (N)"))
+display(plot(bN_hist', labels = ["x" "y" "z"], xlabel = "Time ($dt s)", ylabel = "Magnitude", title = "Unit Mag Vector (N)"))
+display(plot(I_hist', xlabel = "Time ($dt s)", ylabel = "Scaled Current (Coul / $tscale s)", title = "Diode Currents"))
+
+display(plot(states[14:16,:]', labels = ["wx" "wy" "wz"], xlabel = "Time ($dt s)", ylabel = "Bias (??)", title = "Biases"))
+display(plot(states[11:13,:]', labels = ["βx" "βy" "βz"], xlabel = "Time ($dt s)", ylabel = "Angular Velocity (rad/$tscale s)", title = "W"))
+
+if debug_mode
+    display(plot(albedos', xlabel = "Time ($dt s)", ylabel = "Current (% of AM_0)", title = "Albedos"))
+end
+
+
+
