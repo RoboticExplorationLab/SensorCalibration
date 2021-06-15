@@ -240,10 +240,14 @@ function get_diode_albedo_local(albedo_matrix, surface_normal, sat_pos)
     return diode_albedo
 end
 
+cell_centers_ecef = get_albedo_cell_centers() ./ dscale
 
 # Load in reflectivity data as a struct 
-cell_centers_ecef = get_albedo_cell_centers() ./ dscale
-refl_dict = matread("refl.mat")
+#   (Note that the 'refl.mat' file contains 'data', 'type', 'start_time', and 'stop_time' and is simply 
+#       the MATLAB converted TOMS data from https://bhanderi.dk/downloads/ (the averaged data includes a range of times in the title))
+
+# refl_dict = matread("../../Earth_Albedo_Model/Processed_Data/tomsdata2005/2005/ga050101-051231.mat")
+refl_dict = matread("refl.mat") # Same as ^ but saved in local directory
 refl = refl_struct(refl_dict["data"], refl_dict["type"], refl_dict["start_time"], refl_dict["stop_time"])
 println("Loaded in reflectivity data")
 

@@ -13,11 +13,24 @@ function f(x,w)
     return x
 end
 
-function prediction(xk,w,dt, numDiodes)
+function prediction(xk, w, dt, numDiodes)
+    # Predicts next state using current state and angular velocity
+    #
+    # Arguments:
+    #   - xk: Current state [q β c α ϵ]                  | [7 + 3i,]
+    #   - w: Current angular velocity                    | [3,]
+    #   - dt: Time step                                  | Scalar
+    #   - numDiodes: Number of photodiodes being used    | Scalar
+    #
+    # Returns:
+    #   - xn: Predicted next state [q β c α ϵ]                     | [7 + 3i,]
+    #   - A: State Jacobian with respect to state    
+    #           (note that quaternions are replaced with 3 param)  | [(6 + 3i) x (6 + 3i)]
+
     q = xk[1:4]; # Quaternion portion
     b = xk[5:7]; # Bias portion
 
-    γ = w-b;        # Adjusted angular velocity (w - biases)
+    γ = w-b;     # Adjusted angular velocity (w - biases)
     nγ = norm(γ)
 
     theta = (nγ*dt);  
@@ -41,5 +54,4 @@ function prediction(xk,w,dt, numDiodes)
     xn = [qp; b; c; α; ϵ]; # x at next step
 
     return xn, A
-
 end

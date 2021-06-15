@@ -14,21 +14,24 @@ include("mekf.jl");
 include("sun_measurement.jl")
 include("mag_measurement.jl")
 include("current_measurement.jl")
-
 include("prediction.jl")
 include("triad.jl")
 include("rotationFunctions.jl")
 
-@load "mekf_data.jld2" # rB1hist rB2hist rN1 rN2 Ihist whist num_diodes dt calib_vals αs ϵs eclipse + MORE
+@load "mekf_data.jld2" # rB1hist rB2hist rN1 rN2 Ihist whist num_diodes dt calib_vals αs ϵs eclipse noiseValues pos epc
 
 
-_E_am0 = 1366.9 # 
+###### SHOULD I MOVE THESE TO A SHARED FUNCTIONS FILE? ###############################################################################
+_E_am0 = 1366.9 
 
-refl_dict = matread("refl.mat")
+# Load in reflectivity data as a struct 
+#   (Note that the 'refl.mat' file contains 'data', 'type', 'start_time', and 'stop_time' and is simply 
+#       the MATLAB converted TOMS data from https://bhanderi.dk/downloads/ (the averaged data includes a range of times in the title))
+
+# refl_dict = matread("../../Earth_Albedo_Model/Processed_Data/tomsdata2005/2005/ga050101-051231.mat")
+refl_dict = matread("refl.mat") # Same as ^ but saved in local directory
 refl = refl_struct(refl_dict["data"], refl_dict["type"], refl_dict["start_time"], refl_dict["stop_time"])
 
-
-# SHOULD I MOVE THIS TO A SHARED FUNCTIONS FILE?
 function get_diode_albedo_local(albedo_matrix, surface_normal, sat_pos)
     """ 
         Estimates the effect of Earth's albedo on a specific photodiode (by using the surface normal of that diode)
@@ -65,13 +68,14 @@ function get_diode_albedo_local(albedo_matrix, surface_normal, sat_pos)
 end
 
 cell_centers_ecef = get_albedo_cell_centers() #./ (1e6)
-#################
+######################################################################################################################################
+
 
 i = num_diodes
 μ_c = sum(calib_vals) / i;
 σ_α = deg2rad(10); # 5 degrees
 σ_ϵ = deg2rad(10);
-σ_c = 0.1 * μ_c; # 10 percent
+σ_c = 0.1 * μ_c;   # 10 percent
 
 α0 = αs .+ rand(Normal(0.0, σ_α), i)
 ϵ0 = ϵs .+ rand(Normal(0.0, σ_ϵ), i)
@@ -82,7 +86,7 @@ rN = [rN1; rN2];
 
 
 
-#############  
+### NOISE MATRICES - VERIFY ######################
 estimator_params = (angle_random_walk      = 0.06,   # in deg/sqrt(hour)   
                     gyro_bias_instability  = 0.8,    # Bias instability in deg/hour
                     velocity_random_walk   = 0.014,  # in m/sec/sqrt(hour)
@@ -93,31 +97,26 @@ estimator_params = (angle_random_walk      = 0.06,   # in deg/sqrt(hour)
 # Qaa = ((estimator_params[:velocity_random_walk])^2)/3600
 # Qww = ((estimator_params[:angle_random_walk]*(pi/180))^2)/3600                 # Units are rad^2 / second
 
-
 Q_gyro = ((estimator_params[:gyro_bias_instability] * (pi/180)    )^2)/(3600^3)  # Units are now rad^2/seconds^3...?
 σ_orient = sqrt(Q_gyro);
-
 
 Q_bias = ((estimator_params[:angle_random_walk]*(pi/180))^2)/(3600)
 σ_bias = sqrt(Q_bias)
 
-
 Q_diode = 1e-6 # Diode Noise 
 
-# σ_cal = 0.1 * σ_c; σ_azi = 0.1 * σ_α; σ_ele = 0.1 * σ_ϵ;
 σ_cal = Q_diode; σ_azi = Q_diode; σ_ele = Q_diode;
 σ_sunVec = noiseValues[:σ_η_sun]; σ_magVec = noiseValues[:σ_η_mag]; σ_curr = noiseValues[:σ_η_cur];
 
 W = Diagonal([σ_orient * ones(3); σ_bias * ones(3); σ_cal * ones(i); σ_azi * ones(i); σ_ele * ones(i)])
 V = Diagonal([σ_sunVec * ones(3); σ_magVec * ones(3); σ_curr * ones(i)])
 
-# W = abs.(W)
-# V = abs.(V)
-
 # (Values just copied from example code)
 # W = (3.04617e-10) .* I(6+3*i)
 # V = (3.04617e-4)  .* I(6+i) # 6 for getting rotation, i for current measurements
-#############
+###################################################
+
+
 
 
 
@@ -125,20 +124,21 @@ V = Diagonal([σ_sunVec * ones(3); σ_magVec * ones(3); σ_curr * ones(i)])
 q0, R = triad(rN1[:,1],rN2[:,1],rB1hist[:,1],rB2hist[:,2]);
 β0 = [0;0;0];
 
-x0 = [q0; β0; c0; α0; ϵ0]; # Initialize with no bias, c=α=ϵ=rand, [7 x 3i]
+x0 = [q0; β0; c0; α0; ϵ0]; # Initialize with no bias, c=α=ϵ=rand   |  [7 x 3i]
+
 
 # 10 deg, 10 deg/sec, and σ_c, σ_α, σ_ϵ 1-sigma uncertainty 
-# σ_q = (10*pi/180)
-# σ_β = (10*pi/180)
-# p = [σ_q * ones(3); σ_β * ones(3); σ_c * ones(i); σ_α*ones(i); σ_ϵ*ones(i)].^2
-# P0 = diagm(p)
-P0 = (10*pi/180)^2 * I((size(x0, 1) - 1)); # 10 deg. and 10 deg/sec 1-sigma uncertainty + quaternions use an extra variable, so we subtract off
+σ_q = (10*pi/180)
+σ_β = (10*pi/180)
+p = [σ_q * ones(3); σ_β * ones(3); σ_c * ones(i); σ_α*ones(i); σ_ϵ*ones(i)].^2
+P0 = diagm(p)
+# P0 = (10*pi/180)^2 * I((size(x0, 1) - 1)); # 10 deg. and 10 deg/sec 1-sigma uncertainty + quaternions use an extra variable, so we subtract off
 
 println("Beginning MEKF")
-xhist, Phist, dhist = mekf(x0, P0, W, V, rN, whist, yhist, dt, i, eclipse, pos, epc);
+xhist, Phist = mekf(x0, P0, W, V, rN, whist, yhist, dt, i, eclipse, pos, epc);
 println("Finished MEKF")
 
-@load "mekf_truth.jld2" # qtrue, btrue, pos
+@load "mekf_truth.jld2" # qtrue btrue 
 
 
 # Calculate error quaternions
@@ -239,12 +239,12 @@ ePlt3 = hline!([ϵs[3]], color = "green", label = false, linestyle = :dash)
 display(plot(ePlt1, ePlt2, ePlt3, layout = (3,1), title = "Elevation Angles (ϵ)"))
 # plot(xhist[(8+2*i):(7+3*i),:]'); display(hline!(ϵs, linestyle = :dash));
 
-display(plot(dhist', ylim = [0.0, 0.32], title = "Albedo Estimate"))
 
-eError = zeros(6, 5700);
-initErrors = ones(6, 5700);
+
+eError = zeros(6, size(xhist, 2));
+initErrors = ones(6, size(xhist, 2));
 for j = 1:6
     eError[j,:] = abs.((xhist[(7+j+2*i),:] .- ϵs[j]) ./ ϵs[j]);
-    initErrors[j,:] = ones(5700) * abs.( (xhist[(7+j+2*i),1] - ϵs[j]) / ϵs[j]);
+    initErrors[j,:] = ones(size(xhist, 2)) * abs.( (xhist[(7+j+2*i),1] - ϵs[j]) / ϵs[j]);
 end
 plot(eError'); plot!(initErrors', linestyle = :dash, title = "Error relative to initial Error")
