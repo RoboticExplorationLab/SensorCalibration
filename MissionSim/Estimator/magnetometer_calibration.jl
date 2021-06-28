@@ -2,13 +2,12 @@
 #               MAGNETOMETER CALIBRATION                           #
 ####################################################################
 # Get rid of sketchy global 
-
+# Seems to occasionally flip sign of ϕ or ϕ (guesses negative of one?)
 
 # Should I only pass in some?
 struct MAG_CALIB 
     mag_field_meas 
     mag_field_pred
-    # current_meas
 end
 
 ######### SKETCHY 
@@ -18,59 +17,56 @@ curr_hist = 0
 A = 0 
 ################
 
-# Currently does NOT include time-varying current-induced bias (assume we turn off everything while calibrating)
+# Currently does NOT include time-varying current-induced bias (assume we turn off everything while calibrating) -> Check out initial commit for version with currents included 
 function estimate_vals(sat::SATELLITE, data::MAG_CALIB)
-    # Sat ESTIMATE not truth 
-
-    # hcat(map(x -> x * I(3), [4, 5, 6, 7])...)   == kron([4,5,6,7], I(3))'
-    # Find better name for this than "currents"
-    # currents = kron(data.current_meas, I(3))' # Multiply each element by I₃
+    """ Sat ESTIMATE not truth """
 
     if isempty(size(mag_field_meas_hist))  # Initialize   
-        # global curr_hist = data.current_meas
-        # global A = [data.mag_field_pred[1]*I(3) data.mag_field_pred[2]*I(3) data.mag_field_pred[3]*I(3) I(3) currents]
-
         global mag_field_meas_hist = data.mag_field_meas[:]    
         global mag_field_pred_hist = data.mag_field_pred[:]   
         global A = [(data.mag_field_pred[1]*I(3))       (data.mag_field_pred[2]*I(3))[:, 2:3]       (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
-    else
-        # global curr_hist = [curr_hist; curr_hist]
-        # new_row = [data.mag_field_pred[1]*I(3) data.mag_field_pred[2]*I(3) data.mag_field_pred[3]*I(3) I(3) currents]
-        
+    else 
         global mag_field_meas_hist = [mag_field_meas_hist[:]; data.mag_field_meas[:]] # Store as vector
         global mag_field_pred_hist = [mag_field_pred_hist[:]; data.mag_field_pred[:]] # Store as vector
         new_row =  [(data.mag_field_pred[1]*I(3))       (data.mag_field_pred[2]*I(3))[:, 2:3]       (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
 
         global A = [A; new_row]
     end
-    # println("Size mag_field: ", size(mag_field_meas_hist))
-
 
     # If we have enough data to math...
-    if (size(A, 1) > 9000) && ((size(A,1) % 240) == 0) # Needs to be overconstrained, and GN is slow so do it periodically 
-        
-    # if (size(A, 1) > 30) && (size(A, 1) % 48 == 0)
+    if (size(A, 1) > 60) # && ((size(A,1) % 480) == 0) # Needs to be overconstrained, and GN is slow so do it periodically 
+    
         params = A \ mag_field_meas_hist 
         
         params = gauss_newton(params, data)
 
-        # mag_calib_matrix_est = reshape(params[1:9], 3, 3)
-        # bx_est, by_est, bz_est = params[10:12]
-        # induced_scale_factors_est = reshape(params[13:end], size(sat.magnetometer.induced_scale_factors))
-
         mag_calib_matrix_est, β = parameters_to_matrix_bias(params)
         bx_est, by_est, bz_est = β[:]
-
         a_est, b_est, c_est, ρ_est, λ_est, ϕ_est = extract_parameters(mag_calib_matrix_est)
-
 
         # Check for change 
         δscale_factors = sum(abs.(sat.magnetometer.scale_factors - [a_est, b_est, c_est]))
-        δnon_ortho = sum(abs.(sat.magnetometer.non_ortho_angles - [ρ_est, ϕ_est, λ_est]))
+        δnon_ortho = sum(abs.(sat.magnetometer.non_ortho_angles - [ρ_est, λ_est, ϕ_est]))
         δbias = sum(abs.(sat.magnetometer.bias - [bx_est, by_est, bz_est]))
-        # δscale_coefs = sum(abs.(sat.magnetometer.induced_scale_factors - induced_scale_factors_est))
 
-        if (δscale_factors < 0.001) && (δnon_ortho < 0.001) && (δbias < 0.001) # && (δscale_coefs < 0.0025)
+        new_guesses = A * params;
+
+        idx = 0
+        error = 0 
+        for j = 1:Int(length(new_guesses)/3)
+            idx += 1
+            I⁰ = (idx * 3) - 2
+            Iᶠ = (idx * 3)
+            est = norm(new_guesses[I⁰:Iᶠ])
+            meas = norm(mag_field_meas_hist[I⁰:Iᶠ])
+
+            error = abs(est - meas)
+        end
+        # println("Mean Reprojection Error: ", (error / idx), " change: ", (δscale_factors + δnon_ortho))
+
+        # if (δscale_factors < 0.001) && (δnon_ortho < 0.001) && (δbias < 0.01) 
+        # if (error / idx) < 0.25 && (δscale_factors + δnon_ortho) < 0.1
+        if (δscale_factors + δnon_ortho) < 0.1
             println("FINISHED Mag Calib!")
             finished = true 
         else 
@@ -78,12 +74,9 @@ function estimate_vals(sat::SATELLITE, data::MAG_CALIB)
         end
 
         # UPDATE SATELLITE ESTIMATES
-
-
         updated_magnetometer_est = MAGNETOMETER([a_est, b_est, c_est], 
                                                 [ρ_est, λ_est, ϕ_est],
                                                 [bx_est, by_est, bz_est] )
-                                                # induced_scale_factors_est)
         sat.magnetometer = updated_magnetometer_est
 
 
@@ -93,7 +86,7 @@ function estimate_vals(sat::SATELLITE, data::MAG_CALIB)
     end
 
     # Otherwise
-    return sat, false
+    return sat, data, false
 end
 
 function initialize(data::MAG_CALIB)

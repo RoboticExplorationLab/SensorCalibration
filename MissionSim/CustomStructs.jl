@@ -1,6 +1,6 @@
 module CustomStructs
 
-using EarthAlbedo
+using EarthAlbedo, SatelliteDynamics
 
 export MAGNETOMETER, DIODES, SATELLITE, SENSORS, ALBEDO, GROUND_TRUTH, ESTIMATES, TRIVIAL
 
@@ -9,16 +9,15 @@ mutable struct MAGNETOMETER
     scale_factors::Array{<:Real, 1}          # Linear scale factors for soft iron materials (a, b, c)    |   [3,]
     non_ortho_angles::Array{<:Real, 1}       # Offset from purely orthogonal vectors (ρ, λ, ϕ)           |   [3,]
     bias::Array{<:Real, 1}                   # Constant bias on each axis (DC offset) (x₀, y₀, z₀)       |   [3,] 
-    # induced_scale_factors::Array{<:Real, 2}  # Scale factors that relate current to induced mag field    |   [3 x number of diodes]
 end
 Base.deepcopy(s::MAGNETOMETER) = MAGNETOMETER(deepcopy(s.scale_factors), deepcopy(s.non_ortho_angles), deepcopy(s.bias)) #, deepcopy(s.induced_scale_factors))
 
 mutable struct DIODES
-    calib_values        #   [number of diodes, ]
-    azi_values          #   [number of diodes, ]
-    elev_values         #   [number of diodes, ]
+    calib_values::Array{Float32, 1}      #   [number of diodes, ]
+    azi_angles::Array{Float32, 1}         #   [number of diodes, ]
+    elev_angles::Array{Float32, 1}       #   [number of diodes, ]
 end
-Base.deepcopy(s::DIODES) = DIODES(deepcopy(s.calib_values), deepcopy(s.azi_values), deepcopy(s.elev_values))
+Base.deepcopy(s::DIODES) = DIODES(deepcopy(s.calib_values), deepcopy(s.azi_angles), deepcopy(s.elev_angles))
 
 
 mutable struct SATELLITE
@@ -28,10 +27,12 @@ mutable struct SATELLITE
 end
 Base.deepcopy(s::SATELLITE) = SATELLITE(deepcopy(s.J), deepcopy(s.magnetometer), deepcopy(s.diodes))
 
-struct SENSORS # SHOULD THESE BE UNIT or nah?
-    magnetometer  # Bᴮ
-    sun           # sᴮ
-    diodes
+mutable struct SENSORS # SHOULD THESE BE UNIT or nah?
+    magnetometer::Array{Float32, 1}  # Bᴮ
+    sun::Array{Float32, 1}           # sᴮ
+    diodes::Array{Float32, 1}
+    gyro::Array{Float32, 1}
+    gps::Array{Float32, 1}           # Position needed for albedo. Perfect for now
 end
     
 struct ALBEDO
@@ -40,19 +41,11 @@ struct ALBEDO
 end
 
 mutable struct GROUND_TRUTH # Same as sim_results?
-    t_hist 
-    Bᴵ_hist 
-    sᴵ_hist 
-    # ecl_hist
+    t_hist::Epoch
+    Bᴵ_hist::Array{Float32, 1}
+    sᴵ_hist::Array{Float32, 1}
 end
 
-# mutable struct ESTIMATES
-#     # B̃ᴵ_hist 
-#     # s̃ᴵ_hist
-#     # magnetometer::MAGNETOMETER 
-#     # diodes::DIODES 
-#     sat::SATELLITE
-# end
 
 struct TRIVIAL
     junk
