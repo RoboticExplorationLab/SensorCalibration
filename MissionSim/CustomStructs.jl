@@ -4,6 +4,7 @@ using EarthAlbedo, SatelliteDynamics
 
 export MAGNETOMETER, DIODES, SATELLITE, SENSORS, ALBEDO, GROUND_TRUTH, ESTIMATES, TRIVIAL
 
+# Redo all in alphabetical order...? Or can you name it when setting up like DIODES(calib = 4, azi = 3)
 
 mutable struct MAGNETOMETER
     scale_factors::Array{<:Real, 1}          # Linear scale factors for soft iron materials (a, b, c)    |   [3,]

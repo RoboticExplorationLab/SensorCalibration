@@ -2,7 +2,6 @@ module Estimator
 
 # I can just include a file for each estimator to clean up, right? 
 
-include("estimator_config_file.jl")
 using ..CustomStructs
 
 using LinearAlgebra
@@ -11,6 +10,7 @@ using SatelliteDynamics, EarthAlbedo  # Used for sun position in MEKF
 using Random, Distributions
 
 
+# Primary Functions
 export estimate_vals
 export initialize
 
@@ -19,17 +19,12 @@ export MAG_CALIB
 export DIODE_CALIB
 export MEKF
 
-include("../rotationFunctions.jl")    # Contains general functions for working with quaternions
 
+include("estimator_config_file.jl")
+include("../rotationFunctions.jl")    # Contains general functions for working with quaternions
 include("magnetometer_calibration.jl")
 include("diode_calibration.jl")
-
-
-
-
-function initialize(m::MAGNETOMETER)
-    return m 
-end
+include("mekf.jl")
 
 
 function compute_diode_albedo(albedo_matrix, cell_centers_ecef, surface_normal, sat_pos)
@@ -67,50 +62,41 @@ function compute_diode_albedo(albedo_matrix, cell_centers_ecef, surface_normal, 
     return diode_albedo
 end
 
-# MAKE SUBMODULES...?
+function initialize(m::MAGNETOMETER)
+    return m 
+end
+
+# MOVE to CONFIG? σᶜ, μᶜ, etc...?
+function initialize(sat::SATELLITE, diode::DIODES)
+    """ SAT TURTH not EST"""
+    _num_diodes = length(sat.diodes.azi_angles)
+    
+    # # Calib Azi Elev ∈ DIODE 
+    # scale_factor_init_est = rand(Normal(1.0, 0.1), _num_diodes)
+    # azi_angles_init_est   = rand(Normal(pi, deg2rad(7)), _num_diodes)       
+    # elev_angles_init_est  = rand(Normal(pi/2, deg2rad(7)), _num_diodes)
+    # diode = DIODES(scale_factor_init_est, azi_angles_init_est, elev_angles_init_est)
+
+
+    scale_factor_init_est = sat.diodes.calib_values + rand(Normal(0.0, 0.3), _num_diodes)
+    azi_angles_init_est   = sat.diodes.azi_angles + rand(Normal(0.0, deg2rad(10)), _num_diodes)       
+    elev_angles_init_est  = sat.diodes.elev_angles + rand(Normal(0.0, deg2rad(10)), _num_diodes)
+    diode = DIODES(scale_factor_init_est, azi_angles_init_est, elev_angles_init_est)
+
+
+    return diode
+end
 
 ####################################################################
 #               TRIVIAL CASE (does nothing)                        #
 ####################################################################
-# struct TRIVIAL
-#     junk
-# end
 
 function estimate_vals(sat::SATELLITE, data::TRIVIAL)
-    t = data
-    return sat, false 
+    return sat, data, false 
 end
 
 
 
-
-
-
-
-####################################################################
-#                      STANDARD MEKF                               #
-####################################################################
-struct MEKF 
-    # state 
-    # covariance 
-    # inertial_vecs 
-    # ang_vel 
-    # body_vecs 
-    # W 
-    # V
-
-    dt 
-end
-
-function estimate_vals(sat::SATELLITE, data::MEKF)
-    # Initialize with end of diode_calib
-    return sat, true
-end
-
-function initialize(data::MEKF)
-    # In place
-    return data
-end
 
 
 end

@@ -34,10 +34,11 @@ using LinearAlgebra, SatelliteDynamics, Distributions, EarthAlbedo
     r = r / norm(r);       
     θ = rand(Uniform(0, pi)) #pi/4                               
     q0 =  [r * sin(θ/2); cos(θ/2)];
-    w0 = deg2rad.([1.2, 1.0, -0.6])   # HOW DO I SELECT REASONABLE VALUES HERE...?
+    # w0 = deg2rad.([3.2, 1.0, -2.6])   # HOW DO I SELECT REASONABLE VALUES HERE...?
+    w0 = 0.5 .* deg2rad.([10, 2, -7.2])
 
     # Initial Bias
-    β0 = deg2rad(2.0) * randn(3)    
+    β0 = deg2rad(1.0) * randn(3)    
 
     x0 = [eci0[:]; q0[:]; w0[:]; β0[:]]   # Initial state   | [16,]
 
@@ -48,7 +49,7 @@ if true
     _sensor_scale_factors = rand(Normal(1.0, 0.2), _num_diodes)  # Calibration values for each photodiode
 
     # Installation angles for each photodiode
-    _elev_angles = rand(Normal( (pi/4), 0.3), _num_diodes) 
+    _elev_angles = rand(Normal( (pi/4), 0.4), _num_diodes) 
     _elev_angles[_elev_angles .> (pi/2)] .= (pi/2);  #   Elevation ∈ [0, π/2]
     _elev_angles[_elev_angles .< 0] .= 0
 
@@ -60,9 +61,9 @@ end
 # MAGNETOMETER -----------------------------------------------------------------#
 if true
     # MAGNETOMETER 
-    _a, _b, _c = rand(Normal(1.0, 0.5), 3) # Linear scale factors 
+    _a, _b, _c = rand(Normal(1.0, 0.2), 3) # Linear scale factors 
     # _a, _b, _c = 1.0 .+ 0.5 * randn(3)   
-    _βx₀, _βy₀, _βz₀ = rand(Normal(10.0, 3), 3) # Bias (μTeslas) (?)
+    _βx₀, _βy₀, _βz₀ = rand(Normal(7.0, 2), 3) # Bias (μTeslas) (?)
     # _βx₀, _βy₀, _βz₀ = 10.0 * randn(3)     # Bias (μTeslas) (?)
     _ρ, _ϕ, _λ = rand(Normal(pi/12, pi/36), 3) # 15.0 * randn(3)        # Non-orthogonality non_ortho_angles
     # _ρ, _ϕ, _λ = deg2rad(_ρ), deg2rad(_ϕ), deg2rad(_λ)  # convert to radians
@@ -74,9 +75,9 @@ end
 # GENERAL ----------------------------------------------------------------------#
 if true
     _dt = 1.0  # (s)    
-    _T = round(2 * orbit_period(oe0[1]) / _dt)  # Run for 3 orbits    
+    _T = round(2.0 * orbit_period(oe0[1]) / _dt)  # Run for 3 orbits    
     _epc = Epoch(2021, 9, 1, 12, 0, 0, 0.0); # Initial time for sim
     _max_sim_length = Int(_T)
 
-    SYSTEM = (_dt = _dt, _T = _T, _epc = _epc, _max_sim_length = _max_sim_length)
+    SYSTEM = (_dt = _dt, _T = _T, _epc = _epc, _max_sim_length = _max_sim_length, _num_diodes = _num_diodes)
 end 
