@@ -33,8 +33,13 @@ function estimate_vals(sat::SATELLITE, data::MAG_CALIB)
         global A = [A; new_row]
     end
 
-    # If we have enough data to math...
-    if (size(A, 1) > 60) # && ((size(A,1) % 480) == 0) # Needs to be overconstrained, and GN is slow so do it periodically 
+
+
+    # If we have enough data to math... (get ~1 orbit first)
+    if (size(A, 1) > 15000) && ((size(A,1) % 360) == 0) # Needs to be overconstrained, and GN is slow so do it periodically 
+
+        # println("\nMeas: ", data.mag_field_meas[:], " (", norm(data.mag_field_meas), ") | Pred: ", data.mag_field_pred[:], " (", norm(data.mag_field_pred), ")")
+        # println("size Meas: ", size(mag_field_meas_hist), "  |  size Pred: ", size(mag_field_pred_hist), "  | Size A ", size(A)) 
     
         params = A \ mag_field_meas_hist 
         
@@ -42,46 +47,59 @@ function estimate_vals(sat::SATELLITE, data::MAG_CALIB)
 
         mag_calib_matrix_est, β = parameters_to_matrix_bias(params)
         bx_est, by_est, bz_est = β[:]
+
+
+        # Do something more sophisticated like reproject and minimize unsquared error...?
+        # if T[3,3] < 0 && T[1,1] < 0 => T = -T => end   ??
+
+        # if (mag_calib_matrix_est[3,3] < 0) && (mag_calib_matrix_est[1, 1] < 0)
+        #     mag_calib_matrix_est = -mag_calib_matrix_est
+        # end
+
+        if mag_calib_matrix_est[3,3] < 0
+            mag_calib_matrix_est[3,3] = -mag_calib_matrix_est[3,3]
+        end
+        if mag_calib_matrix_est[2,2] < 0 
+            mag_calib_matrix_est[2,2] = -mag_calib_matrix_est[2,2]
+            mag_calib_matrix_est[3,2] = -mag_calib_matrix_est[3,2]
+        end
+        if mag_calib_matrix_est[1,1] < 0
+            mag_calib_matrix_est[:, 1] = -mag_calib_matrix_est[:, 1]
+            # println("Error! Scale factor cannot be negative!")
+            # global stable_count = 0 # BAD not 100% sure if i can just flip all of the first column
+            # break
+        end
+
         a_est, b_est, c_est, ρ_est, λ_est, ϕ_est = extract_parameters(mag_calib_matrix_est)
+
+        if (abs(ρ_est) > pi/3) || (abs(λ_est) > pi/3) || (abs(ϕ_est) > pi/3)
+            println("Error with major non-ortho angles!")
+            println("$ρ_est  |  $λ_est  |  $ϕ_est")
+        end
 
         # Check for change 
         δscale_factors = sum(abs.(sat.magnetometer.scale_factors - [a_est, b_est, c_est]))
         δnon_ortho = sum(abs.(sat.magnetometer.non_ortho_angles - [ρ_est, λ_est, ϕ_est]))
         δbias = sum(abs.(sat.magnetometer.bias - [bx_est, by_est, bz_est]))
 
-        new_guesses = A * params;
 
-        idx = 0
-        error = 0 
-        for j = 1:Int(length(new_guesses)/3)
-            idx += 1
-            I⁰ = (idx * 3) - 2
-            Iᶠ = (idx * 3)
-            est = norm(new_guesses[I⁰:Iᶠ])
-            meas = norm(mag_field_meas_hist[I⁰:Iᶠ])
-
-            error = abs(est - meas)
-        end
-        # println("Mean Reprojection Error: ", (error / idx), " change: ", (δscale_factors + δnon_ortho))
-
-        # if (δscale_factors < 0.001) && (δnon_ortho < 0.001) && (δbias < 0.01) 
-        # if (error / idx) < 0.25 && (δscale_factors + δnon_ortho) < 0.1
-        if (δscale_factors + δnon_ortho) < 0.1
+        if (δscale_factors < 0.05) && (δnon_ortho < 0.05) && (δbias < 0.05) 
             global stable_count += 1
+            # println("Stable!")
         else
             global stable_count = 0
         end
 
         if stable_count > 1
-            println("FINISHED Mag Calib!")
+            # println("FINISHED Mag Calib!")
             finished = true 
         else 
             finished = false 
         end
 
         # UPDATE SATELLITE ESTIMATES
-        updated_magnetometer_est = MAGNETOMETER([a_est, b_est, c_est], 
-                                                [ρ_est, λ_est, ϕ_est],
+        updated_magnetometer_est = MAGNETOMETER([a_est, b_est, c_est],     # NONE should be negative
+                                                [ρ_est, λ_est, ϕ_est],     # NONE should be | | > pi/2 (or even close)
                                                 [bx_est, by_est, bz_est] )
         sat.magnetometer = updated_magnetometer_est
 
@@ -99,6 +117,8 @@ function initialize(data::MAG_CALIB)
     return data
 end
 
+
+    # DOUBLE CHECK λ HERE!!
     function extract_parameters(T)
         a = T[1,1] # Easy 
 
@@ -108,7 +128,7 @@ end
         c = sqrt((T[3,1]^2) + (T[3,2]^2) + (T[3,3]^2))
         ϕ = atan(T[3,2] / T[3,3])
         λ = atan(  sign(T[3,1]) * sqrt( (T[3,1]^2) ),  
-                sign((T[3,2]^2) + (T[3,3]^2)) * sqrt( (T[3,2]^2) + (T[3,3]^2) ) ) # Not positve this portion of the sign is actually useful
+                   sign((T[3,2]^2) + (T[3,3]^2)) * sqrt( (T[3,2]^2) + (T[3,3]^2) ) ) # Not positve this portion of the sign is actually useful
 
         return a, b, c, ρ, λ, ϕ
     end
@@ -116,8 +136,8 @@ end
     function parameters_to_matrix_bias(p)
         # params | [9 x 1] => Lower triangular & bias vector
         T = [p[1]   0       0;
-            p[2]   p[4]    0;
-            p[3]   p[5]    p[6]];      # Calibration matrix
+             p[2]   p[4]    0;
+             p[3]   p[5]    p[6]];      # Calibration matrix
 
         β = p[7:9];     # Bias vector 
 
@@ -131,7 +151,7 @@ end
 
         B = (T_hat^(-1))*(bm - bias_hat)
         B_squared = (B[1]^2) + (B[2]^2) + (B[3]^2)
-        return dot(B, B)
+        return B_squared #dot(B, B)
     end
 
     # USES GLOBALS -> Pass in ?

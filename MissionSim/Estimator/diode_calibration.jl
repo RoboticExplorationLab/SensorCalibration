@@ -28,13 +28,16 @@ end
         #   state, covariance, W, V, Newtonian vectors, w, body vectors, currents, 
         #           (dt, epc, num_diodes?)
         # state: [q β c α ϵ]
-        
+        sᴵ = data.inertial_vecs[1:3] #/ norm(data.inertial_vecs[1:3])
+        Bᴵ = data.inertial_vecs[4:6] #/ norm(data.inertial_vecs[4:6])
+        sᴮ = data.body_vecs[1:3] #/ norm(data.body_vecs[1:3])
+        Bᴮ = data.body_vecs[4:6] #/ norm(data.body_vecs[4:6])
 
         if data.first_pass
-            q₀, R₀ = triad(data.inertial_vecs[1:3], data.inertial_vecs[4:6], data.body_vecs[1:3], data.body_vecs[4:6])
+            # println("In FIRST PASS")
+            q₀, R₀ = triad(sᴵ, Bᴵ, sᴮ, Bᴮ)
             β₀ = [0; 0; 0]
             x₀ = [q₀; β₀; sat.diodes.calib_values; sat.diodes.azi_angles; sat.diodes.elev_angles]
-            # @show x₀
 
             σ_q = (10*pi/180)
             σ_β = (10*pi/180)
@@ -68,11 +71,12 @@ end
 
             data.first_pass = false 
         else
+            # println("In MEKF")
             data.time = data.dt + data.time
             new_state, new_covariance = mekf(data.sat_state, data.covariance, data.W, data.V,
-                                            data.inertial_vecs, data.ang_vel, data.body_vecs, 
-                                            data.current_meas, data.num_diodes, data.pos, data.dt, 
-                                            data.time, data.albedo)
+                                             data.inertial_vecs, data.ang_vel, data.body_vecs, 
+                                             data.current_meas, data.num_diodes, data.pos, data.dt, 
+                                             data.time, data.albedo)
 
             i = data.num_diodes
             scale_factors = wrap(new_state[8:(7+i)])
@@ -90,8 +94,8 @@ end
     end
 
     function wrap(angles)
-        angles[angles .> (2 * pi)] .= angles[angles .> (2 * pi)] .- (2 * pi)
-        angles[angles .< 0] .= angles[angles .< 0] .+ (2 * pi)
+        # angles[angles .> (2 * pi)] .= angles[angles .> (2 * pi)] .- (2 * pi)
+        # angles[angles .< 0] .= angles[angles .< 0] .+ (2 * pi)
         return angles
     end
 
@@ -119,15 +123,17 @@ end
         #   (Note that the code currently assumes no correlation at all in noise matrix)
         #   returns the next x and P values 
 
-        if sum(abs.(rᴵ[1,:])) == 0
+        if sum(abs.(rᴵ[1,:])) < 0.05
             eclipse = true   # Should probably use threshold τ rather than 0 
-            # println("Eclipsed!")
+            println("Eclipsed!")
         else
             eclipse = false
             # println("No Eclipse!")
         end
 
         # Predict x, P
+
+        # NORMALIZE ALL VECTORS TO MAKE THEM UNIT 
         rᴵ[1,:] = rᴵ[1,:] / norm(rᴵ[1,:])
         rᴵ[2,:] = rᴵ[2,:] / norm(rᴵ[2,:])
         rᴮ[1,:] = rᴮ[1,:] / norm(rᴮ[1,:])
