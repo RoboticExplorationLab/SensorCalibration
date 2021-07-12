@@ -4,6 +4,13 @@
 # Get rid of sketchy global 
 # Seems to occasionally flip sign of ϕ or ϕ (guesses negative of one?)
 
+using JLD2
+function save_global_variables(sat_truth, sat_init_est)
+    @save "orbit_data_for_mag_calib.jl" mag_field_meas_hist mag_field_pred_hist A sat_truth sat_init_est
+    println("Saved Orbit data!")
+end
+
+
 struct MAG_CALIB 
     mag_field_meas 
     mag_field_pred
@@ -18,7 +25,7 @@ stable_count = 0
 ################
 
 # Currently does NOT include time-varying current-induced bias (assume we turn off everything while calibrating) -> Check out initial commit for version with currents included 
-function estimate_vals(sat::SATELLITE, data::MAG_CALIB)
+function estimate_vals(sat::SATELLITE, data::MAG_CALIB, estimate_flag)
     """ Sat ESTIMATE not truth """
 
     if isempty(size(mag_field_meas_hist))  # Initialize   
@@ -36,25 +43,15 @@ function estimate_vals(sat::SATELLITE, data::MAG_CALIB)
 
 
     # If we have enough data to math... (get ~1 orbit first)
-    if (size(A, 1) > 15000) && ((size(A,1) % 360) == 0) # Needs to be overconstrained, and GN is slow so do it periodically 
+    if estimate_flag #(size(A, 1) > 5749) #&& ((size(A,1) % 360) == 0) # Needs to be overconstrained, and GN is slow so do it periodically 
 
-        # println("\nMeas: ", data.mag_field_meas[:], " (", norm(data.mag_field_meas), ") | Pred: ", data.mag_field_pred[:], " (", norm(data.mag_field_pred), ")")
-        # println("size Meas: ", size(mag_field_meas_hist), "  |  size Pred: ", size(mag_field_pred_hist), "  | Size A ", size(A)) 
-    
+
         params = A \ mag_field_meas_hist 
         
         params = gauss_newton(params, data)
 
         mag_calib_matrix_est, β = parameters_to_matrix_bias(params)
         bx_est, by_est, bz_est = β[:]
-
-
-        # Do something more sophisticated like reproject and minimize unsquared error...?
-        # if T[3,3] < 0 && T[1,1] < 0 => T = -T => end   ??
-
-        # if (mag_calib_matrix_est[3,3] < 0) && (mag_calib_matrix_est[1, 1] < 0)
-        #     mag_calib_matrix_est = -mag_calib_matrix_est
-        # end
 
         if mag_calib_matrix_est[3,3] < 0
             mag_calib_matrix_est[3,3] = -mag_calib_matrix_est[3,3]
@@ -77,25 +74,25 @@ function estimate_vals(sat::SATELLITE, data::MAG_CALIB)
             println("$ρ_est  |  $λ_est  |  $ϕ_est")
         end
 
-        # Check for change 
-        δscale_factors = sum(abs.(sat.magnetometer.scale_factors - [a_est, b_est, c_est]))
-        δnon_ortho = sum(abs.(sat.magnetometer.non_ortho_angles - [ρ_est, λ_est, ϕ_est]))
-        δbias = sum(abs.(sat.magnetometer.bias - [bx_est, by_est, bz_est]))
+        # # Check for change 
+        # δscale_factors = sum(abs.(sat.magnetometer.scale_factors - [a_est, b_est, c_est]))
+        # δnon_ortho = sum(abs.(sat.magnetometer.non_ortho_angles - [ρ_est, λ_est, ϕ_est]))
+        # δbias = sum(abs.(sat.magnetometer.bias - [bx_est, by_est, bz_est]))
 
 
-        if (δscale_factors < 0.05) && (δnon_ortho < 0.05) && (δbias < 0.05) 
-            global stable_count += 1
-            # println("Stable!")
-        else
-            global stable_count = 0
-        end
+        # if (δscale_factors < 0.05) && (δnon_ortho < 0.05) && (δbias < 0.05) 
+        #     global stable_count += 1
+        #     # println("Stable!")
+        # else
+        #     global stable_count = 0
+        # end
 
-        if stable_count > 1
-            # println("FINISHED Mag Calib!")
-            finished = true 
-        else 
-            finished = false 
-        end
+        # if stable_count > 1
+        #     # println("FINISHED Mag Calib!")
+        #     finished = true 
+        # else 
+        #     finished = false 
+        # end
 
         # UPDATE SATELLITE ESTIMATES
         updated_magnetometer_est = MAGNETOMETER([a_est, b_est, c_est],     # NONE should be negative
@@ -106,6 +103,7 @@ function estimate_vals(sat::SATELLITE, data::MAG_CALIB)
 
         # PLOT IF FINISHED??
 
+        finished = true
         return sat, data, finished
     end
 
@@ -115,6 +113,12 @@ end
 
 function initialize(data::MAG_CALIB)
     return data
+end
+
+
+#########################
+function new_mag_calib()
+    return MAG_CALIB(0.0, 0.0)
 end
 
 

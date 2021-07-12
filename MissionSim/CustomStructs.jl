@@ -2,7 +2,7 @@ module CustomStructs
 
 using EarthAlbedo, SatelliteDynamics
 
-export MAGNETOMETER, DIODES, SATELLITE, SENSORS, ALBEDO, GROUND_TRUTH, ESTIMATES, TRIVIAL
+export MAGNETOMETER, DIODES, SATELLITE, SENSORS, ALBEDO, GROUND_TRUTH, ESTIMATES, TRIVIAL, FLAGS
 
 # Redo all in alphabetical order...? Or can you name it when setting up like DIODES(calib = 4, azi = 3)
 
@@ -30,7 +30,7 @@ Base.deepcopy(s::SATELLITE) = SATELLITE(deepcopy(s.J), deepcopy(s.magnetometer),
 
 mutable struct SENSORS # SHOULD THESE BE UNIT or nah?
     magnetometer::Array{Float32, 1}  # Bᴮ
-    sun::Array{Float32, 1}           # sᴮ
+    # sun::Array{Float32, 1}           # sᴮ
     diodes::Array{Float32, 1}
     gyro::Array{Float32, 1}
     gps::Array{Float32, 1}           # Position needed for albedo. Perfect for now
@@ -45,11 +45,20 @@ mutable struct GROUND_TRUTH # Same as sim_results?
     t_hist::Epoch
     Bᴵ_hist::Array{Float32, 1}
     sᴵ_hist::Array{Float32, 1}
+    ŝᴮ_hist::Array{Float32, 1}
 end
 
 
 struct TRIVIAL
     junk
 end
+
+
+mutable struct FLAGS 
+    in_sun::Bool 
+    mag_calibrated::Bool
+    diodes_calibrated::Bool
+end
+
 
 end

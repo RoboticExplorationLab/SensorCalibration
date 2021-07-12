@@ -35,7 +35,7 @@ using LinearAlgebra, SatelliteDynamics, Distributions, EarthAlbedo
     θ = rand(Uniform(0, pi))                         
     q0 =  [r * sin(θ/2); cos(θ/2)];
     # w0 = deg2rad.([1.5, 1.3, -1.2])   # HOW DO I SELECT REASONABLE VALUES HERE...?
-    w0 = 0.75 .* deg2rad.([10, 2, -7.2])
+    w0 = 0.15 .* deg2rad.([10, 2, -7.2])
 
     # Initial Bias
     β0 = deg2rad(1.0) * randn(3)    
@@ -45,20 +45,27 @@ using LinearAlgebra, SatelliteDynamics, Distributions, EarthAlbedo
 
 # DIODES -----------------------------------------------------------------------#
     _num_diodes = 6
-    _sensor_scale_factors = rand(Normal(1.0, 0.2), _num_diodes)  # Calibration values for each photodiode
+    _sensor_scale_factors = rand(Normal(1.0, 0.15), _num_diodes)  # Calibration values for each photodiode
 
     # Installation angles for each photodiode
-    _elev_angles = rand(Normal( (pi/4), 0.4), _num_diodes) 
-    _elev_angles[_elev_angles .> (pi/2)] .= (pi/2);  #   Elevation ∈ [0, π/2]
-    _elev_angles[_elev_angles .< 0] .= 0
+    _elev_angles = [0.0; 0.0;  0.0;    0.0;    (pi/2); (-pi/2)] 
+    _azi_angles  = [0.0; pi;   (pi/2); (-pi/2); 0.0;    0.0 ]
 
-    _azi_angles = rand(Normal( (pi), 1.0), _num_diodes)
-    _azi_angles[_azi_angles .>= (2*pi)] .= (2*pi - 0.1); # Azimuth ∈ [0, 2π)
-    _azi_angles[_azi_angles .< 0] .= 0
+    _elev_angles += rand(Normal(0.0, deg2rad(2.0)), _num_diodes)
+    _azi_angles  += rand(Normal(0.0, deg2rad(2.0)), _num_diodes)
+    # println("No noise in angles!")
+
+    # _elev_angles = rand(Normal( (pi/4), 0.4), _num_diodes) 
+    # _elev_angles[_elev_angles .> (pi/2)] .= (pi/2);  #   Elevation ∈ [0, π/2]
+    # _elev_angles[_elev_angles .< 0] .= 0
+
+    # _azi_angles = rand(Normal( (pi), 1.0), _num_diodes)
+    # _azi_angles[_azi_angles .>= (2*pi)] .= (2*pi - 0.1); # Azimuth ∈ [0, 2π)
+    # _azi_angles[_azi_angles .< 0] .= 0
 
 
 # MAGNETOMETER -----------------------------------------------------------------#
-    _a, _b, _c = rand(Normal(1.0, 0.075), 3) # Linear scale factors 
+    _a, _b, _c = rand(Normal(1.0, 0.1), 3) # Linear scale factors 
     _βx₀, _βy₀, _βz₀ = rand(Normal(0.0, 2), 3) # Bias (μTeslas) (?)
     println("bias should be 5%")
     _ρ, _ϕ, _λ = rand(Normal(0.0, deg2rad(4.0)), 3) # 0.0 * randn(3)        # Non-orthogonality non_ortho_angles
@@ -67,7 +74,7 @@ using LinearAlgebra, SatelliteDynamics, Distributions, EarthAlbedo
 
 # GENERAL ----------------------------------------------------------------------#
     _dt = 1.0  # (s)    
-    _T = round(5 * orbit_period(oe0[1]) / _dt)  # Run for 3 orbits    
+    _T = round(5.0 * orbit_period(oe0[1]) / _dt)  # Run for 3 orbits    
     _epc = Epoch(2021, 9, 1, 12, 0, 0, 0.0); # Initial time for sim
     _max_sim_length = Int(_T)
 

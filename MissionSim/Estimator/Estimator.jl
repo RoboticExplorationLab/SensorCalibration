@@ -13,6 +13,8 @@ using Random, Distributions
 # Primary Functions
 export estimate_vals
 export initialize
+export save_global_variables ## REMOVE
+export new_diode_calib
 
 # Types of estimators available:
 export MAG_CALIB
@@ -72,17 +74,11 @@ function initialize(sat::SATELLITE, diode::DIODES)
     _num_diodes = length(sat.diodes.azi_angles)
     
     # # Calib Azi Elev ∈ DIODE 
-    # scale_factor_init_est = rand(Normal(1.0, 0.1), _num_diodes)
-    # azi_angles_init_est   = rand(Normal(pi, deg2rad(7)), _num_diodes)       
-    # elev_angles_init_est  = rand(Normal(pi/2, deg2rad(7)), _num_diodes)
-    # diode = DIODES(scale_factor_init_est, azi_angles_init_est, elev_angles_init_est)
 
-
-    scale_factor_init_est = sat.diodes.calib_values + rand(Normal(0.0, 0.3), _num_diodes)
-    azi_angles_init_est   = sat.diodes.azi_angles + rand(Normal(0.0, deg2rad(10)), _num_diodes)       
-    elev_angles_init_est  = sat.diodes.elev_angles + rand(Normal(0.0, deg2rad(10)), _num_diodes)
+    scale_factor_init_est = ones(_num_diodes) #sat.diodes.calib_values + rand(Normal(0.0, 0.3), _num_diodes)
+    azi_angles_init_est   = [0.0; pi;   (pi/2); (-pi/2); 0.0;    0.0 ] #sat.diodes.azi_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)       
+    elev_angles_init_est  = [0.0; 0.0;  0.0;    0.0;    (pi/2); (-pi/2)]  #sat.diodes.elev_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)
     diode = DIODES(scale_factor_init_est, azi_angles_init_est, elev_angles_init_est)
-
 
     return diode
 end

@@ -23,75 +23,75 @@ mutable struct DIODE_CALIB
 end
 
     # STATE here != state of simulator !!!!
-    function estimate_vals(sat::SATELLITE, data::DIODE_CALIB)
-        # data:
-        #   state, covariance, W, V, Newtonian vectors, w, body vectors, currents, 
-        #           (dt, epc, num_diodes?)
-        # state: [q β c α ϵ]
-        sᴵ = data.inertial_vecs[1:3] #/ norm(data.inertial_vecs[1:3])
-        Bᴵ = data.inertial_vecs[4:6] #/ norm(data.inertial_vecs[4:6])
-        sᴮ = data.body_vecs[1:3] #/ norm(data.body_vecs[1:3])
-        Bᴮ = data.body_vecs[4:6] #/ norm(data.body_vecs[4:6])
+function estimate_vals(sat::SATELLITE, data::DIODE_CALIB)
+    # data:
+    #   state, covariance, W, V, Newtonian vectors, w, body vectors, currents, 
+    #           (dt, epc, num_diodes?)
+    # state: [q β c α ϵ]
+    sᴵ = data.inertial_vecs[1:3] #/ norm(data.inertial_vecs[1:3])
+    Bᴵ = data.inertial_vecs[4:6] #/ norm(data.inertial_vecs[4:6])
+    sᴮ = data.body_vecs[1:3] #/ norm(data.body_vecs[1:3])
+    Bᴮ = data.body_vecs[4:6] #/ norm(data.body_vecs[4:6])
 
-        if data.first_pass
-            # println("In FIRST PASS")
-            q₀, R₀ = triad(sᴵ, Bᴵ, sᴮ, Bᴮ)
-            β₀ = [0; 0; 0]
-            x₀ = [q₀; β₀; sat.diodes.calib_values; sat.diodes.azi_angles; sat.diodes.elev_angles]
+    if data.first_pass
+        # println("In FIRST PASS")
+        q₀, R₀ = triad(sᴵ, Bᴵ, sᴮ, Bᴮ)
+        β₀ = [0; 0; 0]
+        x₀ = [q₀; β₀; sat.diodes.calib_values; sat.diodes.azi_angles; sat.diodes.elev_angles]
 
-            σ_q = (10*pi/180)
-            σ_β = (10*pi/180)
-            σ_c = 0.2; σ_α = 1.0; σ_ϵ = 0.3
-            p = [σ_q * ones(3); σ_β * ones(3); σ_c * ones(data.num_diodes); σ_α*ones(data.num_diodes); σ_ϵ*ones(data.num_diodes)].^2
-            P₀ = diagm(p)
+        σ_q = (10*pi/180)
+        σ_β = (10*pi/180)
+        σ_c = 0.2; σ_α = 1.0; σ_ϵ = 0.3
+        p = [σ_q * ones(3); σ_β * ones(3); σ_c * ones(data.num_diodes); σ_α*ones(data.num_diodes); σ_ϵ*ones(data.num_diodes)].^2
+        P₀ = diagm(p)
 
-            estimator_params = (angle_random_walk      = 0.06,   # in deg/sqrt(hour)   
-                                gyro_bias_instability  = 0.8,    # Bias instability in deg/hour
-                                velocity_random_walk   = 0.014,  # in m/sec/sqrt(hour)
-                                accel_bias_instability = 6)      # in microG
+        estimator_params = (angle_random_walk      = 0.06,   # in deg/sqrt(hour)   
+                            gyro_bias_instability  = 0.8,    # Bias instability in deg/hour
+                            velocity_random_walk   = 0.014,  # in m/sec/sqrt(hour)
+                            accel_bias_instability = 6)      # in microG
 
-            Q_gyro = ((estimator_params[:gyro_bias_instability] * (pi/180)    )^2)/(3600^3)  # Units are now rad^2/seconds^3...?
-            σ_orient = sqrt(Q_gyro);
+        Q_gyro = ((estimator_params[:gyro_bias_instability] * (pi/180)    )^2)/(3600^3)  # Units are now rad^2/seconds^3...?
+        σ_orient = sqrt(Q_gyro);
 
-            Q_bias = ((estimator_params[:angle_random_walk]*(pi/180))^2)/(3600)
-            σ_bias = sqrt(Q_bias)
+        Q_bias = ((estimator_params[:angle_random_walk]*(pi/180))^2)/(3600)
+        σ_bias = sqrt(Q_bias)
 
-            Q_diode = 1e-6 # Diode Noise 
+        Q_diode = 1e-6 # Diode Noise 
 
-            σ_cal = Q_diode; σ_azi = Q_diode; σ_ele = Q_diode;
-            σ_sunVec = deg2rad(5.0); σ_magVec = deg2rad(5.0); σ_curr = 0.008;
+        σ_cal = Q_diode; σ_azi = Q_diode; σ_ele = Q_diode;
+        σ_sunVec = deg2rad(5.0); σ_magVec = deg2rad(5.0); σ_curr = 0.008;
 
-            W = Diagonal([σ_orient * ones(3); σ_bias * ones(3); σ_cal * ones(data.num_diodes); σ_azi * ones(data.num_diodes); σ_ele * ones(data.num_diodes)])
-            V = Diagonal([σ_sunVec * ones(3); σ_magVec * ones(3); σ_curr * ones(data.num_diodes)])
-            
-            data.sat_state = x₀
-            data.covariance = P₀
-            data.W = W 
-            data.V = V
+        W = Diagonal([σ_orient * ones(3); σ_bias * ones(3); σ_cal * ones(data.num_diodes); σ_azi * ones(data.num_diodes); σ_ele * ones(data.num_diodes)])
+        V = Diagonal([σ_sunVec * ones(3); σ_magVec * ones(3); σ_curr * ones(data.num_diodes)])
+        
+        data.sat_state = x₀
+        data.covariance = P₀
+        data.W = W 
+        data.V = V
 
-            data.first_pass = false 
-        else
-            # println("In MEKF")
-            data.time = data.dt + data.time
-            new_state, new_covariance = mekf(data.sat_state, data.covariance, data.W, data.V,
-                                             data.inertial_vecs, data.ang_vel, data.body_vecs, 
-                                             data.current_meas, data.num_diodes, data.pos, data.dt, 
-                                             data.time, data.albedo)
+        data.first_pass = false 
+    else
+        # println("In MEKF")
+        data.time = data.dt + data.time
+        new_state, new_covariance = mekf(data.sat_state, data.covariance, data.W, data.V,
+                                            data.inertial_vecs, data.ang_vel, data.body_vecs, 
+                                            data.current_meas, data.num_diodes, data.pos, data.dt, 
+                                            data.time, data.albedo)
 
-            i = data.num_diodes
-            scale_factors = wrap(new_state[8:(7+i)])
-            azi_angles    = wrap(new_state[(8+i):(7+2*i)])
-            elev_angles   = wrap(new_state[(8+2*i):(end)])
+        i = data.num_diodes
+        scale_factors = wrap(new_state[8:(7+i)])
+        azi_angles    = wrap(new_state[(8+i):(7+2*i)])
+        elev_angles   = wrap(new_state[(8+2*i):(end)])
 
-            diodes = DIODES(scale_factors, azi_angles, elev_angles)
-            sat.diodes = diodes
+        diodes = DIODES(scale_factors, azi_angles, elev_angles)
+        sat.diodes = diodes
 
-            data.sat_state = new_state 
-            data.covariance = new_covariance 
-        end
-
-        return sat, data, false
+        data.sat_state = new_state 
+        data.covariance = new_covariance 
     end
+
+    return sat, data, false
+end
 
     function wrap(angles)
         # angles[angles .> (2 * pi)] .= angles[angles .> (2 * pi)] .- (2 * pi)
@@ -99,13 +99,13 @@ end
         return angles
     end
 
-
 function initialize(albedo, state, system) 
+    println("Need to not use state in diode init!")
     d = DIODE_CALIB(albedo,
                     0.0, # NOT the same as x0
                     0.0, # Just empty stuff to be filled in 
                     0.0, # UPDATE with rᴵ
-                    state[11:13], 
+                    state[11:13], # angular velocity 
                     0.0, # UPDATE with rᴮ
                     0.0, # UPDATE with current_meas 
                     0.0, # Update with W 
@@ -118,14 +118,32 @@ function initialize(albedo, state, system)
     return d
 end
 
+function new_diode_calib(albedo, sens::SENSORS, system) 
+    d = DIODE_CALIB(albedo,
+                    0.0, # NOT the same as x0
+                    0.0, # Just empty stuff to be filled in 
+                    0.0, # UPDATE with rᴵ
+                    sens.gyro, # angular velocity 
+                    0.0, # UPDATE with rᴮ
+                    0.0, # UPDATE with current_meas 
+                    0.0, # Update with W 
+                    0.0, # Update with V 
+                    system._dt, 
+                    system._epc,
+                    system._num_diodes,
+                    sens.gps, # Position
+                    true) # First pass
+    return d
+end
+
     function mekf(x, P, W, V, rᴵ, w, rᴮ,  y, _num_diodes, pos, dt, time, alb::ALBEDO)
         # Runs a single step of a multiplicative extended Kalman filter. 
         #   (Note that the code currently assumes no correlation at all in noise matrix)
         #   returns the next x and P values 
 
-        if sum(abs.(rᴵ[1,:])) < 0.05
+        if sum(abs.(rᴵ[1,:])) < 0.01
             eclipse = true   # Should probably use threshold τ rather than 0 
-            println("Eclipsed!")
+            # println("Eclipsed (in MEKF)!")
         else
             eclipse = false
             # println("No Eclipse!")
