@@ -3,6 +3,9 @@
 ####################################################################
 # Make sketchy globals into a struct (same with mag calib)
 
+using Infiltrator
+
+
 mutable struct DIODE_CALIB 
     albedo::ALBEDO        
     sat_state     # x
@@ -28,14 +31,20 @@ function estimate_vals(sat::SATELLITE, data::DIODE_CALIB)
     #   state, covariance, W, V, Newtonian vectors, w, body vectors, currents, 
     #           (dt, epc, num_diodes?)
     # state: [q β c α ϵ]
-    sᴵ = data.inertial_vecs[1:3] #/ norm(data.inertial_vecs[1:3])
-    Bᴵ = data.inertial_vecs[4:6] #/ norm(data.inertial_vecs[4:6])
-    sᴮ = data.body_vecs[1:3] #/ norm(data.body_vecs[1:3])
-    Bᴮ = data.body_vecs[4:6] #/ norm(data.body_vecs[4:6])
+
+    𝐬ᴵ = data.inertial_vecs[1, :] / norm(data.inertial_vecs[1, :])      
+    𝐁ᴵ = data.inertial_vecs[2, :] / norm(data.inertial_vecs[2, :])      
+    𝐬ᴮ = data.body_vecs[1, :] / norm(data.body_vecs[1, :])              # Should already be unit 
+    Bᴮ = data.body_vecs[2, :] / norm(data.body_vecs[2, :])              
 
     if data.first_pass
-        # println("In FIRST PASS")
-        q₀, R₀ = triad(sᴵ, Bᴵ, sᴮ, Bᴮ)
+        q̂, R₀ = triad(𝐬ᴵ, 𝐁ᴵ, 𝐬ᴮ, Bᴮ)
+
+        # q = data.sat_state[1:4]
+        # println("Using state knowledge to init q₀")
+        q₀ = q̂
+
+
         β₀ = [0; 0; 0]
         x₀ = [q₀; β₀; sat.diodes.calib_values; sat.diodes.azi_angles; sat.diodes.elev_angles]
 
@@ -44,6 +53,9 @@ function estimate_vals(sat::SATELLITE, data::DIODE_CALIB)
         σ_c = 0.2; σ_α = 1.0; σ_ϵ = 0.3
         p = [σ_q * ones(3); σ_β * ones(3); σ_c * ones(data.num_diodes); σ_α*ones(data.num_diodes); σ_ϵ*ones(data.num_diodes)].^2
         P₀ = diagm(p)
+
+        # TRY !!
+        # P₀ = (10 * pi / 180)^2 * I(6 + 3*6)
 
         estimator_params = (angle_random_walk      = 0.06,   # in deg/sqrt(hour)   
                             gyro_bias_instability  = 0.8,    # Bias instability in deg/hour
@@ -62,7 +74,8 @@ function estimate_vals(sat::SATELLITE, data::DIODE_CALIB)
         σ_sunVec = deg2rad(5.0); σ_magVec = deg2rad(5.0); σ_curr = 0.008;
 
         W = Diagonal([σ_orient * ones(3); σ_bias * ones(3); σ_cal * ones(data.num_diodes); σ_azi * ones(data.num_diodes); σ_ele * ones(data.num_diodes)])
-        V = Diagonal([σ_sunVec * ones(3); σ_magVec * ones(3); σ_curr * ones(data.num_diodes)])
+        # V = Diagonal([σ_sunVec * ones(3); σ_magVec * ones(3); σ_curr * ones(data.num_diodes)])
+        V = Diagonal([σ_magVec * ones(3); σ_curr * ones(data.num_diodes)])
         
         data.sat_state = x₀
         data.covariance = P₀
@@ -73,6 +86,8 @@ function estimate_vals(sat::SATELLITE, data::DIODE_CALIB)
     else
         # println("In MEKF")
         data.time = data.dt + data.time
+    end
+    
         new_state, new_covariance = mekf(data.sat_state, data.covariance, data.W, data.V,
                                             data.inertial_vecs, data.ang_vel, data.body_vecs, 
                                             data.current_meas, data.num_diodes, data.pos, data.dt, 
@@ -88,7 +103,7 @@ function estimate_vals(sat::SATELLITE, data::DIODE_CALIB)
 
         data.sat_state = new_state 
         data.covariance = new_covariance 
-    end
+    # end
 
     return sat, data, false
 end
@@ -100,9 +115,10 @@ end
     end
 
 function initialize(albedo, state, system) 
-    println("Need to not use state in diode init!")
+    println("Need to not use state in diode init! (or sat_state in TRIAD)")
+    sat_state = [state[7:10][:]; zeros(21)[:]]
     d = DIODE_CALIB(albedo,
-                    0.0, # NOT the same as x0
+                    sat_state, #sat_state, # NOT the same as x0
                     0.0, # Just empty stuff to be filled in 
                     0.0, # UPDATE with rᴵ
                     state[11:13], # angular velocity 
@@ -142,20 +158,19 @@ end
         #   returns the next x and P values 
 
         if sum(abs.(rᴵ[1,:])) < 0.01
-            eclipse = true   # Should probably use threshold τ rather than 0 
-            # println("Eclipsed (in MEKF)!")
+            eclipse = true  
         else
             eclipse = false
-            # println("No Eclipse!")
         end
 
         # Predict x, P
-
         # NORMALIZE ALL VECTORS TO MAKE THEM UNIT 
-        rᴵ[1,:] = rᴵ[1,:] / norm(rᴵ[1,:])
-        rᴵ[2,:] = rᴵ[2,:] / norm(rᴵ[2,:])
-        rᴮ[1,:] = rᴮ[1,:] / norm(rᴮ[1,:])
-        rᴮ[2,:] = rᴮ[2,:] / norm(rᴮ[2,:])
+        # rᴵ not unit, rᴮ[1,:] already unit
+
+        sᴵ = rᴵ[1,:];  𝐬ᴵ = sᴵ / norm(sᴵ)
+        Bᴵ = rᴵ[2,:];  𝐁ᴵ = Bᴵ / norm(Bᴵ)
+        𝐬ᴮ = rᴮ[1,:]                      #### CURRENTLY ONLY HAVE UNIT
+        Bᴮ = rᴮ[2,:];  𝐁ᴮ = Bᴮ / norm(Bᴮ)
 
         x_p, A = prediction(x, w, dt, _num_diodes); # State prediction
         P_p = A*P*A' + W; # Covariance prediction 
@@ -165,39 +180,37 @@ end
         C = Array{Float64}(undef, 0, size(P_p,1))
         Vs = Array{Float64}(undef)  ## ASSUMES NO CORRELATION AT ALL !!
 
-        if !eclipse  #  Sun Vector measurement
-            V_sun = V[1:3, 1:3]; 
-            yp_sun, C_sun = sun_measurement(x_p, rᴵ[1, :], _num_diodes) 
-            z_sun = rᴮ[1,:]  - yp_sun
-            z = [z[:]; z_sun[:]]
-            C = [C; C_sun]
-            Vs = [Vs[:]; diag(V_sun)[:]]  # Does this need Vs[:]?
-        end
+        # if false #!eclipse  #  Sun Vector measurement
+            #     V_sun = V[1:3, 1:3]; 
+            #     yp_sun, C_sun = sun_measurement(x_p, rᴵ[1, :], _num_diodes) 
+            #     z_sun = rᴮ[1,:]  - yp_sun
+            #     z = [z[:]; z_sun[:]]
+            #     C = [C; C_sun]
+            #     Vs = [Vs[:]; diag(V_sun)[:]]  # Does this need Vs[:]?
+        # end
 
         if true            #  Magnetic Field measurement
-            V_mag = V[4:6, 4:6];
-            yp_mag, C_mag = mag_measurement(x_p, rᴵ[2,:], _num_diodes)
-            z_mag = rᴮ[2,:] - yp_mag ##
-            z = [z[:]; z_mag[:]]
-            C = [C; C_mag];
-            Vs = [Vs[:]; diag(V_mag)[:]]
+            V_mag = V[1:3, 1:3];
+            yp_mag, C_mag = mag_measurement(x_p, 𝐁ᴵ, _num_diodes)   
+            z_mag = 𝐁ᴮ - yp_mag 
+            z = z_mag[:]
+            C = C_mag
+            Vs = [diag(V_mag)[:]]
         end
         
 
-        #### ECLIPSE and POS arent recovered!
         if !eclipse    #  Diode Current Measurement
-            V_cur = V[7:end, 7:end];
-            # time = (k-1) * dt + epc
-            yp_cur, C_cur = current_measurement(x_p, rᴵ[1,:], _num_diodes, 1.0, pos, time, alb)
-            z_cur = y - yp_cur       
+            V_cur = V[4:end, 4:end]
+            yp_cur, C_cur = current_measurement(x_p, 𝐬ᴵ, _num_diodes, 1.0, pos, time, alb) # If !eclipse, set ν = 1.0
+            z_cur = y - yp_cur 
             z = [z[:]; z_cur[:]]
             C = [C; C_cur]
-            Vs = [Vs[:]; diag(V_cur)[:]]
+            Vs = [Vs...; diag(V_cur)[:]]  
         end
 
 
         # Innovation   
-        Vs = Vs[2:end] # Get rid of the initial 0 term   
+        # Vs = Vs[2:end] # Get rid of the initial 0 term  
         Vk = Diagonal(Vs) 
         S = C*P_p*C' + Vk;  
 
@@ -219,7 +232,6 @@ end
         x_next[5:end] = x_p[5:end] + drest;
         
         P_next = (I(size(P,1)) - L*C) * P_p * (I(size(P,1)) - L*C)' + L*Vk*L';  
-
 
         return x_next, P_next
     end
@@ -261,13 +273,13 @@ end
             return y, H
         end
 
-        function mag_measurement(x, bN, i)
+        function mag_measurement(x, 𝐁ᴵ, i)
             # Generates the "measured" body vector from the magnetic field vector
             #      (What our measurement would be given our estimated attitude)
             # Inputs:
             #   - x: Current state of the satellite 
             #           ([q⃗, q0] β⃗ C⃗ α⃗ ϵ⃗)                                            |  [6 + 3i,]
-            #   - bN: Unit magnetic field vector in the newtonian (inertial) frame   |  [3,]
+            #   - 𝐁ᴵ: Unit magnetic field vector in the newtonian (inertial) frame   |  [3,]
             #   - i: Number of diodes                                                |  (scalar)
             # Outputs:
             #   - y: Unit vector in body frame corresponding to bN & q               |  [3,]
@@ -282,37 +294,36 @@ end
             α = x[(8+i):(7+2*i)]
             ϵ = x[(8+2*i):end]
 
-            B_Q_N = dcm_from_q(q)'; # DCM from quaternion (flipped)    
-            bB = B_Q_N*bN;     # this is what the measurement would be given our estimated attitude
+            ᴮQᴵ = dcm_from_q(q)'; # DCM from quaternion (flipped)    
+            𝐁ᴮ = ᴮQᴵ*𝐁ᴵ;     # this is what the measurement would be given our estimated attitude
 
-            bB_hat = hat(bB); 
-            ∂θ = bB_hat 
+            B̂ᴮ = hat(𝐁ᴮ); # Hat as in skew-symmetric, not unit or estimate 
+
+            ∂θ = B̂ᴮ 
             ∂β = zeros(3, 3)
             ∂C = zeros(3, i)
             ∂α = zeros(3, i)
-            ∂ϵ = zeros(3, i)
+            ∂ϵ = zeros(3, i)    
 
             H = [∂θ ∂β ∂C ∂α ∂ϵ]; # [3 x 6 + 3i]
-            y = bB[:]             # [3 x 1]
+            y = 𝐁ᴮ[:]             # [3 x 1]
 
             return y, H
         end
 
-        function current_measurement(x, sN, i, ecl, pos, time, alb::ALBEDO)
+        function current_measurement(x, 𝐬ᴵ, i, ecl, pos, time, alb::ALBEDO)
             # Generates the "measured" current values from the sun vector
             #      (What our measurement would be given our sun vector)
             # Inputs:
             #   - x: Current state of the satellite 
             #           ([q⃗, q0] β⃗ C⃗ α⃗ ϵ⃗)                                    |  [6 + 3i,]
-            #   - sN: Unit sun vector in the newtonian (inertial) frame      |  [3,]
+            #   - 𝐬ᴵ: Unit sun vector in the newtonian (inertial) frame      |  [3,]
             #   - i: Number of diodes                                        |  (scalar)
             #   - ecl: Eclipse factor η ∈ [0, 1]                             |  (scalar)
             # Outputs:
-            #   - y: Current measurements corresponding to sN & q            |  [i]
+            #   - y: Current measurements corresponding to 𝐬ᴵ & q            |  [i]
             #   - H: Jacobian of y with respect to x
             #           dy/dx = [dy/dPhi; dy/dBeta; ...]                     |  [i x 6 + 3i]
-        
-        
 
             x = x[:]
             q = x[1:4]
@@ -320,33 +331,33 @@ end
             c = x[8:(7+i)]  
             α = x[(8+i):(7+2*i)]
             ϵ = x[(8+2*i):end]
+
+            ᴮQᴵ = dcm_from_q(q)'; # DCM from quaternion (transposed)
+            sᴮ = ᴮQᴵ * 𝐬ᴵ
         
-            B_Q_N = dcm_from_q(q)'; # DCM from quaternion (flipped)    
-            sB = B_Q_N*sN;  # this is what the sun measurement would be given our sun vector
-        
-            sB_hat = hat(sB); 
+            ŝᴮ= hat(sᴮ); 
             n = [cos.(ϵ).*cos.(α) cos.(ϵ).*sin.(α) sin.(ϵ)];  # [i x 3]
             
-            ∂θ = (c .* n) * sB_hat; # [i x 3]
+            ∂θ = (c .* n) * ŝᴮ; # [i x 3]
             ∂β = zeros(i, 3);       # [i x 3]
-            ∂C = n * sB;            # [i x 1]
+            ∂C = n * sᴮ;            # [i x 1]
         
             ndα = [(-cos.(ϵ).*sin.(α)) (cos.(ϵ).*cos.(α)) zeros(size(α))];
-            ∂α = c .* (ndα * sB);   # [i x 1]
+            ∂α = c .* (ndα * sᴮ);   # [i x 1]
         
             ndϵ = [(-sin.(ϵ).*cos.(α)) (-sin.(ϵ).*sin.(α)) cos.(ϵ)]; # (With negative middle term)
-            ∂ϵ = c .* (ndϵ * sB);   # [i x 1]  
+            ∂ϵ = c .* (ndϵ * sᴮ);   # [i x 1]  
         
             H = [∂θ ∂β Diagonal(∂C) Diagonal(∂α) Diagonal(∂ϵ)] # [i x 6 + 3i]
         
         
-            I_meas = c .* (n * sB) .+ 0; # Measured current, ALBEDO added in later
+            I_meas = c .* (n * sᴮ) .+ 0; # Measured current, ALBEDO added in later
         
         
             # ADD IN ALBEDO
-            sN_unscaled = sun_position(time) - pos;
+            sᴵ_unscaled = sun_position(time) - pos;
         
-            albedo_matrix, ignore = albedo(pos, sN_unscaled, alb.refl)
+            albedo_matrix, ignore = albedo(pos, sᴵ_unscaled, alb.refl)
         
             for j = 1:i
                 surface_normal = [cos(ϵ[j])*cos(α[j]) cos(ϵ[j])*sin(α[j]) sin(ϵ[j])]     # Photodiode surface normal 
@@ -363,8 +374,7 @@ end
             I_meas *= ecl
             I_meas[I_meas .< 0] .= 0  # Photodiodes don't generate negative current
             H[I_meas .≤ 0, :] .= 0    # ^ To match the above
-            y = I_meas[:]             # [i x 1]
-        
+            y = I_meas[:]             # [i x 1]        
             return y, H
         end
 
@@ -393,8 +403,8 @@ end
         
             qp = qmult(q, [r*sin(theta/2); cos(theta/2)]); 
             
-            skew = -1*[0 -γ[3] γ[2]; γ[3] 0 -γ[1]; -γ[2] γ[1] 0]; # Hat
-        
+            skew = -hat(γ)
+
             R = (I(3) + (skew/nγ)*sin(nγ*dt) + ((skew/nγ)^2)*(1 - cos(nγ*dt)));     # Rodrigues (for matrix exponential?)
         
             A = [R -dt*I(3); zeros(3,3) I(3)]; # Jacobian of f(x)
@@ -423,6 +433,29 @@ end
             #   - q: A quaternion (scalar last) representing the rotation         | [4,]
             #           between the two frames
         
+            𝐫₁ᴵ = rN1 / norm(rN1)
+            𝐫₂ᴵ = rN2 / norm(rN2)
+            𝐫₁ᴮ = rB1 / norm(rB1)
+            𝐫₂ᴮ = rB2 / norm(rB2)
+
+            t₁ᴵ = 𝐫₁ᴵ
+            t₂ᴵ = cross(𝐫₁ᴵ, 𝐫₂ᴵ)/norm(cross(𝐫₁ᴵ,𝐫₂ᴵ));
+            t₃ᴵ = cross(t₁ᴵ, t₂ᴵ)/norm(cross(t₁ᴵ,t₂ᴵ));
+
+            Tᴵ = [t₁ᴵ[:] t₂ᴵ[:] t₃ᴵ[:]]
+
+            t₁ᴮ = 𝐫₁ᴮ
+            t₂ᴮ = cross(𝐫₁ᴮ, 𝐫₂ᴮ)/norm(cross(𝐫₁ᴮ,𝐫₂ᴮ));
+            t₃ᴮ = cross(t₁ᴮ, t₂ᴮ)/norm(cross(t₁ᴮ,t₂ᴮ));
+
+            Tᴮ = [t₁ᴮ[:] t₂ᴮ[:] t₃ᴮ[:]]
+
+            R = Tᴵ * (Tᴮ')
+
+            # q = q_from_DCM(R);
+        
+            # return q, R
+
         
             rN1 = rN1 / norm(rN1)
             rN2 = rN2 / norm(rN2)
@@ -444,10 +477,12 @@ end
         
             # DCM
             R = nT*(bT');
+
         
             # QUATERNION
             q = q_from_DCM(R);
         
             return q, R
         end
+
     

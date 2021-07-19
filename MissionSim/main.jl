@@ -8,9 +8,10 @@ using ProgressMeter
 using EarthAlbedo
 using MAT
 
+using Infiltrator
 
 using Random
-# Random.seed!(123414)
+# Random.seed!(12973)
 
 
 include("mag_field.jl")            # Contains IGRF13 stuff
@@ -18,12 +19,11 @@ include("rotationFunctions.jl")    # Contains general functions for working with
 
 include("CustomStructs.jl");         using .CustomStructs
 include("system_config_file.jl"); 
+
 include("Estimator/Estimator.jl");   using .Estimator
 include("Simulator/Simulator.jl");   using .Simulator
 include("Controller/Controller.jl"); using .Controller
 
-
-# Shared functions (diode_albedo, 
 @enum(Operation_mode, mag_cal = 1, detumble, diode_cal, full_control, finished, chill)
 Base.to_index(s::Operation_mode) = Int(s)
 
@@ -55,11 +55,6 @@ function main()
     _̂J = _J
     satellite_estimate = SATELLITE(_̂J, m, d) # Jhat = J for now
 
-    # satellite_initial = deepcopy(satellite_estimate)
-
-
-    println("Pre-allocating history arrays")
-    # Record
     estimates_hist = Array{SATELLITE,1}(undef, _max_sim_length)
     sensors_hist = Array{SENSORS, 1}(undef, _max_sim_length)
     ground_truth_hist = Array{GROUND_TRUTH, 1}(undef, _max_sim_length)
@@ -103,10 +98,6 @@ function main()
     temp_cor = zeros(3, _max_sim_length)
     count = 0
 
-
-
-
-
     temp_flag = false
     progress_bar = Progress(_max_sim_length)
 
@@ -116,7 +107,9 @@ function main()
 
 
 
-    # @showprogress "Working"
+
+
+    # Design alternative with if/else structure instead of uniformity to compare complexity 
     for i = 1:_max_sim_length
         state = x_hist[:, i]
         t = ground_truth_hist[i].t_hist + (i - 1) * _dt
@@ -156,6 +149,7 @@ function main()
             satellite_estimate, updated_data, estimator_finished = estimate_vals(satellite_estimate, estimators[operation_mode])
         end
 
+
         # if i % 60 == 0 
         #     satellite_estimate, updated_data, estimator_finished = estimate_vals(satellite_estimate, estimators[operation_mode])
         # else 
@@ -171,7 +165,7 @@ function main()
 
         if operation_mode == diode_cal 
             change, estimator_finished = check_if_finished(old_estimate, satellite_estimate, updated_data)
-            if count < 3000
+            if count < 2500
                 estimator_finished = false 
             end
         end
@@ -193,6 +187,7 @@ function main()
         # Update histories
         x_hist[:, i + 1] = new_state
         x_hist[7:10, i + 1] = x_hist[7:10, i + 1] / norm(x_hist[7:10, i + 1]) # Normalize quaternions
+
 
         if operation_mode == diode_cal 
             mekf_hist[1:4, i] = updated_data.sat_state[1:4]   # Quats
@@ -240,8 +235,13 @@ function main()
 
         count += 1
 
+        if norm(truth.ŝᴮ_hist) < 0.01
+            ecl = true
+        else
+            ecl = false
+        end
         sun_error = norm(truth.ŝᴮ_hist - sun_vec_est[:, i])
-        notes = string("Change: $change     |     Sun vector error: $sun_error")
+        notes = string("Change: $change    \t|   Ecl: $ecl   \t|   Sun vector error: $sun_error")
         ProgressMeter.next!(progress_bar; showvalues = [(:Mode, operation_mode), (:Iteration, i), (:Notes, notes)])
     end
 
@@ -271,7 +271,6 @@ function sensors_to_estimators(sens::SENSORS, truth::GROUND_TRUTH, data::MAG_CAL
     # return [mag_calib; triv; diode_calib; mekf]
     return [mag_calib; mag_calib; mag_calib; mag_calib]
 end
-# Do I need to return a set if I am overloading? DIODE_CALIB
 
 
 ####################
@@ -280,12 +279,14 @@ function sensors_to_estimators(sens::SENSORS, truth::GROUND_TRUTH, data::DIODE_C
     # Assumes that IGRF IS PERFECT
     """ [MAG_CALIB; TRIVIAL; DIODE_CALIB; MEKF] """
     # MAG_CALIB: B_meas, B_pred, current 
-    B_meas = sens.magnetometer
-    B_pred = truth.Bᴵ_hist
+    B_meas = sens.magnetometer  # IN BODY FRAME (== Bᴮ)
+    B_pred = truth.Bᴵ_hist      # IN INTERTIAL FRAME! (== Bᴵ)
     mag_calib = MAG_CALIB(B_meas, B_pred) 
 
+    sᴵ = truth.sᴵ_hist
     ŝᴮ = estimate_sun_vector(sens, sat_est)
-    # ŝᴮ = truth.ŝᴮ_hist      ################################
+    # ŝᴮ = truth.ŝᴮ_hist 
+
 
     # TRIVIAL: Garbage 
     triv = TRIVIAL(0.0)
@@ -315,7 +316,6 @@ function sensors_to_estimators(sens::SENSORS, truth::GROUND_TRUTH, data::TRIVIAL
     triv = TRIVIAL(0.0)
     return [triv; triv; triv; triv]
 end
-
 
 
 
@@ -355,6 +355,7 @@ function check_if_finished(hist,i)
     if i < 101
         return false
     else
+        # println(norm(hist[11:13, i]))
         ωs = hist[11:13, (i-100):i]
         T = size(ωs, 2)
         norms = zeros(T)
@@ -366,7 +367,9 @@ function check_if_finished(hist,i)
 
         change = sum(abs.(norms .- μω))
 
-        if  change < 0.00075
+        current_ang_vel = norm(hist[11:13, i])
+
+        if current_ang_vel < deg2rad(6.0) #  change < 0.00075
             # println("Finished controller: ", sum(abs.(norms .- μω)))
             return change, true 
         else
@@ -391,7 +394,7 @@ function correct_mag_field(sat, B̃ᴮ)
 
     B̂ᴮ = T̂^(-1) * (B̃ᴮ - β)
 
-    return B̂ᴮ # Corrected mag field in body frame
+    return B̂ᴮ # Corrected mag field in body frame -> not unit
 end
 
 function estimate_sun_vector(sens::SENSORS, sat_est::SATELLITE)
@@ -495,7 +498,7 @@ function report_on_magnetometer(truth::SATELLITE, est::SATELLITE, init::SATELLIT
         βx₀, βy₀, βz₀ = round(βx₀, sigdigits = 3), round(βy₀, sigdigits = 3), round(βz₀ , sigdigits = 3)
 
     println("__________________________________________________________________________")
-    println("___PARAM___|___Truth____|___Final Guess__|___Init Guess___|___Improved?___")
+    println("___PARAM___|___Truth____|__Final Guess__|___Init Guess___|__Improved?__")
     println("     a     |   $a \t|    $aᶠ    \t|    $a₀         | ", abs(a - aᶠ) < abs(a - a₀) ? "better!" : "worse!")
     println("     b     |   $b \t|    $bᶠ    \t|    $b₀         | ", abs(b - bᶠ) < abs(b - b₀) ? "better!" : "worse!")
     println("     c     |   $c \t|    $cᶠ    \t|    $c₀         | ", abs(c - cᶠ) < abs(c - c₀) ? "better!" : "worse!")
@@ -518,7 +521,7 @@ function report_on_detumbler(x, sensors_hist::Array{SENSORS,1})
         mag_w[i] = rad2deg(norm(x[11:13, i]))
     end
 
-    w = plot(rad2deg.(x[11:13, :])', color = [:red :blue :green], label = ["wₓ" "wy" "wz"], title = "Ang Vel (rad/sec)")
+    w = plot(rad2deg.(x[11:13, :])', color = [:red :blue :green], label = ["wₓ" "wy" "wz"], title = "Ang Vel (deg/sec)")
     w = plot!(ŵ', linestyle = :dash, color = [:red :blue :green], label = ["ŵₓ" "ŵy" "ŵz"])
     w = plot!(mag_w, linestyle = :dot, color = :black, label = "|w_true|")
     display(w)
@@ -537,23 +540,27 @@ function report_on_diodes(truth::SATELLITE, est_hist::Array{SATELLITE,1})
         α_est[:, i] = rad2deg.(est_hist[i].diodes.azi_angles)
         ϵ_est[:, i] = rad2deg.(est_hist[i].diodes.elev_angles)
     end
+    ϵ₀ = rad2deg.([0.0; 0.0;  0.0;    0.0;    (pi/4); (-pi/4)])
+    α₀ = rad2deg.([0.0; 0.0;  0.0;    0.0;    (pi/4); (-pi/4)])
+    c₀ = ones(6)
 
-    c₀, ϵ₀, α₀ = c_est[:, 1], ϵ_est[:, 1], α_est[:, 1]
+
+    # c₀, ϵ₀, α₀ = c_est[:, 1], ϵ_est[:, 1], α_est[:, 1]
     cᶠ, ϵᶠ, αᶠ = c_est[:, end], ϵ_est[:, end], α_est[:, end]
     c, ϵ, α = truth.diodes.calib_values, rad2deg.(truth.diodes.elev_angles), rad2deg.(truth.diodes.azi_angles)
 
     println("\n----- DIODE REPORT -----")
     for i = 1:_num_diodes
         print("Diode $i:")
-        print( abs(c₀[i] - c[i]) < abs(cᶠ[i] - c[i]) ? "C: Worse!" : "C: Better!"); print("  (", round(c[i] ,sigdigits = 3), " & ", round(c₀[i], sigdigits = 3), " (init) vs ", round(cᶠ[i], sigdigits = 3) ,") \t| ")
-        print( abs(ϵ₀[i] - ϵ[i]) < abs(ϵᶠ[i] - ϵ[i]) ? "E: Worse! " : "E: Better!"); print("  (", round(ϵ[i] ,sigdigits = 3), " & ", round(ϵ₀[i], sigdigits = 3), " (init) vs ", round(ϵᶠ[i], sigdigits = 3) ,") \t| ")
-        print( abs(α₀[i] - α[i]) < abs(αᶠ[i] - α[i]) ? "A: Worse! " : "A: Better!"); print("  (", round(α[i] ,sigdigits = 3), " & ", round(α₀[i], sigdigits = 3), " (init) vs ", round(αᶠ[i], sigdigits = 3) ,")\n")
+        print( abs(c₀[i] - c[i]) ≤ abs(cᶠ[i] - c[i]) ? "C: Worse!" : "C: Better!"); print("  (", round(c[i] ,sigdigits = 3), " & ", round(cᶠ[i], sigdigits = 3), " vs ", round(c₀[i], sigdigits = 3) ," (init))    \t| ")
+        print( abs(ϵ₀[i] - ϵ[i]) ≤ abs(ϵᶠ[i] - ϵ[i]) ? "E: Worse! " : "E: Better!"); print("  (", round(ϵ[i] ,sigdigits = 3), " & ", round(ϵᶠ[i], sigdigits = 3), " vs ", round(ϵ₀[i], sigdigits = 3) ," (init)) \t| ")
+        print( abs(α₀[i] - α[i]) ≤ abs(αᶠ[i] - α[i]) ? "A: Worse! " : "A: Better!"); print("  (", round(α[i] ,sigdigits = 3), " & ", round(αᶠ[i], sigdigits = 3), " vs ", round(α₀[i], sigdigits = 3) ," (init))\n")
     end
     println("------------------------")
 
-    c_off = 0.25
-    e_off = 5.0
-    a_off = 5.0
+    c_off = 0.2
+    e_off = 3.0
+    a_off = 3.0
     cp, ap, ep = Array{Plots.Plot{Plots.GRBackend}, 1}(undef, _num_diodes), Array{Plots.Plot{Plots.GRBackend}, 1}(undef, _num_diodes), Array{Plots.Plot{Plots.GRBackend}, 1}(undef, _num_diodes)
     for i = 1:_num_diodes
         cp[i] = plot(c_est[i, :], title = "Scale Factor (C)", label = false); cp[i] = hline!([c₀[i]], linestyle = :dot, label = false); cp[i] = hline!([c[i]], ylim = [c[i] - c_off, c[i] + c_off], linestyle = :dash, label = false)
@@ -580,12 +587,9 @@ end
 
 
 
-
 sun_vec_est, mekf_hist, satellite_truth, satellite_estimate, x_hist, ground_truth_hist, sensors_hist, estimates_hist = main();
 
 display(plot(x_hist[1:3, :]', title = "Position"))
-
-
 
 
 N = size(x_hist, 2) - 1
@@ -602,8 +606,6 @@ display(plot(tru1, tru2, layout = (2,1)))
 
 # report_on_diodes(satellite_truth, estimates_hist)
 
-
-
 ##### MAGNETOMETER CALIBRATION
 N = size(x_hist, 2) - 1
 Bᴵ = zeros(3, N)
@@ -613,6 +615,7 @@ diodes = zeros(6, N)
 gyro = zeros(3, N)
 Bᴮ = zeros(3, N)
 ŝᴮ = zeros(3, N)
+currents = zeros(6, N)
 for i = 1:N
     Bᴮ[:, i] = sensors_hist[i].magnetometer
     gyro[:, i] = sensors_hist[i].gyro 
@@ -620,6 +623,7 @@ for i = 1:N
     Bᴵ[:, i] = ground_truth_hist[i].Bᴵ_hist
     sᴵ[:, i] = ground_truth_hist[i].sᴵ_hist
     ŝᴮ[:, i] = ground_truth_hist[i].ŝᴮ_hist
+    currents[:, i] = sensors_hist[i].diodes
 end
 tru1 = plot(Bᴵ', title = "Bᴵ")
 tru2 = plot(sᴵ', title = "sᴵ")
@@ -659,8 +663,8 @@ if N == _max_sim_length # Diodes didn't finish
     report_on_diodes(satellite_truth, estimates_hist)
 end
 
-sp = plot(sun_vec_est', title = "Sun Vector (body) Estimate", label = ["x̂" "ŷ" "ẑ"])
-sp = plot!(ŝᴮ', linestyle = :dash, label = ["x" "y" "z"])
+sp = plot(sun_vec_est[:,1:N]', title = "Sun Vector (body) Estimate", label = ["x̂" "ŷ" "ẑ"])
+sp = plot!(ŝᴮ[:, 1:N]', linestyle = :dash, label = ["x" "y" "z"])
 display(plot(sp))
 
 err = zeros(3, N);
@@ -675,8 +679,17 @@ ep = plot(err', title = "Error in Sun vector estimate", label = ["x" "y" "z"])
 ep2 = plot(n_err, title = "Norm of Error")
 display(plot(ep, ep2, layout = (2,1)))
 
-qp1 = plot(mekf_hist[1:4, 1:N]', title = "Attitude"); qp2 = plot(x_hist[7:10,:]', title = "Truth"); qp3 = plot( (x_hist[7:10,2:(end)] - mekf_hist[1:4, 1:N])', title = "Dif");
+qp1 = plot(mekf_hist[1:4, 1:N]', title = "Attitude Estimate"); qp2 = plot(x_hist[7:10,:]', title = "Truth");  qp3 = plot( (x_hist[7:10,2:(end)] - mekf_hist[1:4, 1:N])', title = "Dif");
 display(plot(qp1, qp2, qp3, layout = (3,1)))
 
-bp1 = plot(mekf_hist[5:7, 1:N]', title = "Bias"); bp2 = plot(x_hist[14:16,:]', title = "Truth"); bp3 = plot( (x_hist[14:16,2:(end)] - mekf_hist[5:7, 1:N])', title = "Dif", ylim = [-0.02, 0.02]);
+bp1 = plot(mekf_hist[5:7, 1:N]',   title = "Bias Estimate"  ); bp2 = plot(x_hist[14:16,:]', title = "Truth"); bp3 = plot( (x_hist[14:16,2:(end)] - mekf_hist[5:7, 1:N])', title = "Dif", ylim = [-0.02, 0.02]);
 display(plot(bp1, bp2, bp3, layout = (3,1)))
+
+
+d1 = plot(currents[1,:], title = "Diode Currents")
+d2 = plot(currents[2,:], title = "Diode Currents")
+d3 = plot(currents[3,:], title = "Diode Currents")
+d4 = plot(currents[4,:], title = "Diode Currents")
+d5 = plot(currents[5,:], title = "Diode Currents")
+d6 = plot(currents[6,:], title = "Diode Currents")
+display(plot(d1, d2, d3, d4, d5, d6, layout = (3,2)))

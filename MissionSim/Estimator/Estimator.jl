@@ -28,7 +28,6 @@ include("magnetometer_calibration.jl")
 include("diode_calibration.jl")
 include("mekf.jl")
 
-
 function compute_diode_albedo(albedo_matrix, cell_centers_ecef, surface_normal, sat_pos)
     """ 
         Estimates the effect of Earth's albedo on a specific photodiode (by using the surface normal of that diode)
@@ -76,9 +75,11 @@ function initialize(sat::SATELLITE, diode::DIODES)
     # # Calib Azi Elev ∈ DIODE 
 
     scale_factor_init_est = ones(_num_diodes) #sat.diodes.calib_values + rand(Normal(0.0, 0.3), _num_diodes)
-    azi_angles_init_est   = [0.0; pi;   (pi/2); (-pi/2); 0.0;    0.0 ] #sat.diodes.azi_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)       
-    elev_angles_init_est  = [0.0; 0.0;  0.0;    0.0;    (pi/2); (-pi/2)]  #sat.diodes.elev_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)
+    azi_angles_init_est   = [0.0; pi;   (pi/2); (-pi/2); 0.0;   (-pi/4)] #.+ (pi/6) #sat.diodes.azi_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)       
+    elev_angles_init_est  = [0.0; 0.0;  0.0;    0.0;    (pi/4); (-pi/4)] #.+ (pi/6) #sat.diodes.elev_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)
     diode = DIODES(scale_factor_init_est, azi_angles_init_est, elev_angles_init_est)
+
+    # println("Need to not add pi/4 here and in config")
 
     return diode
 end

@@ -14,9 +14,9 @@ end
 Base.deepcopy(s::MAGNETOMETER) = MAGNETOMETER(deepcopy(s.scale_factors), deepcopy(s.non_ortho_angles), deepcopy(s.bias)) #, deepcopy(s.induced_scale_factors))
 
 mutable struct DIODES
-    calib_values::Array{Float32, 1}      #   [number of diodes, ]
-    azi_angles::Array{Float32, 1}         #   [number of diodes, ]
-    elev_angles::Array{Float32, 1}       #   [number of diodes, ]
+    calib_values::Array{Float64, 1}      #   [number of diodes, ]
+    azi_angles::Array{Float64, 1}         #   [number of diodes, ]
+    elev_angles::Array{Float64, 1}       #   [number of diodes, ]
 end
 Base.deepcopy(s::DIODES) = DIODES(deepcopy(s.calib_values), deepcopy(s.azi_angles), deepcopy(s.elev_angles))
 
@@ -29,11 +29,10 @@ end
 Base.deepcopy(s::SATELLITE) = SATELLITE(deepcopy(s.J), deepcopy(s.magnetometer), deepcopy(s.diodes))
 
 mutable struct SENSORS # SHOULD THESE BE UNIT or nah?
-    magnetometer::Array{Float32, 1}  # Bᴮ
-    # sun::Array{Float32, 1}           # sᴮ
-    diodes::Array{Float32, 1}
-    gyro::Array{Float32, 1}
-    gps::Array{Float32, 1}           # Position needed for albedo. Perfect for now
+    magnetometer::Array{Float64, 1}  # Bᴮ
+    diodes::Array{Float64, 1}
+    gyro::Array{Float64, 1}
+    gps::Array{Float64, 1}           # Position needed for albedo. Perfect for now
 end
     
 struct ALBEDO
@@ -43,9 +42,9 @@ end
 
 mutable struct GROUND_TRUTH # Same as sim_results?
     t_hist::Epoch
-    Bᴵ_hist::Array{Float32, 1}
-    sᴵ_hist::Array{Float32, 1}
-    ŝᴮ_hist::Array{Float32, 1}
+    Bᴵ_hist::Array{Float64, 1}
+    sᴵ_hist::Array{Float64, 1}
+    ŝᴮ_hist::Array{Float64, 1}
 end
 
 
