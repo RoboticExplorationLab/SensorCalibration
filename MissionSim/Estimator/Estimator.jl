@@ -16,6 +16,8 @@ export initialize
 export save_global_variables ## REMOVE
 export new_diode_calib
 
+export check_if_run # # # # #
+
 # Types of estimators available:
 export MAG_CALIB
 export DIODE_CALIB
@@ -75,8 +77,13 @@ function initialize(sat::SATELLITE, diode::DIODES)
     # # Calib Azi Elev ∈ DIODE 
 
     scale_factor_init_est = ones(_num_diodes) #sat.diodes.calib_values + rand(Normal(0.0, 0.3), _num_diodes)
-    azi_angles_init_est   = [0.0; pi;   (pi/2); (-pi/2); 0.0;   (-pi/4)] #.+ (pi/6) #sat.diodes.azi_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)       
-    elev_angles_init_est  = [0.0; 0.0;  0.0;    0.0;    (pi/4); (-pi/4)] #.+ (pi/6) #sat.diodes.elev_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)
+    azi_angles_init_est   = [0.0;      pi;    (pi/2); (-pi/2);  0.0;    pi] #.+ (pi/6) #sat.diodes.azi_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)       
+    elev_angles_init_est  = [(-pi/4); (pi/4);  0.0;    0.0;    (pi/4); (-pi/4)] #.+ (pi/6) #sat.diodes.elev_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)
+    
+    # elev_angles_init_est = [(-pi/4);  (pi/4);      0.0;      0.0; (pi/4);  (-pi/4)] 
+    # azi_angles_init_est  = [(pi/4); (5*pi/4); (3*pi/4); (7*pi/4); (pi/4); (5*pi/4)]  
+    
+    
     diode = DIODES(scale_factor_init_est, azi_angles_init_est, elev_angles_init_est)
 
     # println("Need to not add pi/4 here and in config")
@@ -89,7 +96,7 @@ end
 ####################################################################
 
 function estimate_vals(sat::SATELLITE, data::TRIVIAL)
-    return sat, data, false 
+    return sat, data #, false 
 end
 
 

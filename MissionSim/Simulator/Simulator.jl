@@ -1,7 +1,7 @@
 module Simulator
 
 using ..CustomStructs
-using LinearAlgebra, SatelliteDynamics, EarthAlbedo
+using LinearAlgebra, SatelliteDynamics, EarthAlbedo, Distributions
 
 using Infiltrator
 
@@ -25,7 +25,7 @@ struct SIM # For now, just used for multiple dispatch
     junk
 end
 
-# Bias...? 
+println("Google an appropriate bias sigma, and noise matrix sigma AND all noise actually ")
 function dynamics(sat::SATELLITE, x, u, t)
     """ Propagates state dynamics.  Called in _____. Assumes t includes epoch already """
 
@@ -43,8 +43,8 @@ function dynamics(sat::SATELLITE, x, u, t)
     ẇ = (J^(-1)) * (u - cross(w, (J*w)))
     # ẇ = J \ (u - cross(w, J*w))
 
-    σβ = deg2rad(0.05)  #0.22
-    δβ = σβ * randn(3)  #β̇  looks funny so I am using δ
+    σβ = deg2rad(0.22)  #0.22
+    δβ = 0.25 * σβ * randn(3)  #β̇  looks funny so I am using δ
 
     return [ṙ[:]; v̇[:]; q̇[:]; ẇ[:]; δβ[:]]
 end
@@ -106,43 +106,68 @@ end
         return (x_n + (1/6)*(k1+2*k2+2*k3 + k4))
     end
 
-
-        
-# Still relies on old faulty eclipse, noise not all in 
-# No vectors are normed... yet?
+# Still relies on old faulty eclipse
+println("IN SIM: ecl is being rounded - shouldn't round here")
+# @warn "Sim still relies on old faulty eclipse function!"
 function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONSTANTS, dt)
-    """ Generates sensor measurements. sat_truth, Called in _____"""
+    """ 
+        Generates sensor measurements, including noise.
+
+        Arguments:
+        - sim: Used to determine which simulator to use                                 | SIM 
+        - sat: TRUE satellite data, which is used to generate sensor measurements       | SATELLITE
+                    J (inertia matrix, [3 x 3])          //  magnetometer (calibration values, [3,]),
+                    diodes (photodiode parameters [3,])  //  state (attitude and bias, [7,])
+        - alb: Albedo struct containing REFL data and cell centers                      | ALBEDO
+                    REFL    //   cell_centers_ecef
+        - x: Environmental state (pos, vel, att, ang vel, bias)                         | [16,]
+        - t: Current time, as an epoch                                                  | Scalar{Epoch}
+        - CONSTANTS: Various constants needed (Earth radius, μ , E_am₀)                 | [3,]       
+        - dt: Time step                                                                 | Scalar
+        
+        Returns:
+        - truth: TRUTH struct containing true values for current time and vectors in body/inertial frame    | TRUTH
+        - sensors: SENSORS struct containing noisy values for each satellite sensor being simulated         | SENSOR
+        - ecl: Scale factor used to track how much the satellite is eclipsed by the Earth (∈ [0, 1])        | Scalar
+        - noise: NOISE struct containing the amount of noise added to the sensors                           | NOISE
+    """  
     pos = x[1:3]
     q⃗ = x[7:9]; q₀ = x[10] # Vector, Scalar portions
 
-    # ᴺRᴮ = I(3) + 2 * hat(q⃗) * (q₀ * I(3) + hat(q⃗)); # Equation from Kevin, quaternion -> DCM (eq 39)
-    # ᴮRᴺ = transpose(ᴺRᴮ) # N -> B  SAME AS NEXT LINE
-    ᴮRᴺ = dcm_from_q(x[7:10])'
+    ᴮRᴵ = dcm_from_q(x[7:10])'     # ᴺRᴮ = I(3) + 2 * hat(q⃗) * (q₀ * I(3) + hat(q⃗)); # Equation from Kevin, quaternion -> DCM (eq 39)
 
-    sᴵ = sun_position(t)  # Sun-Earth vector
-    ecl = eclipse_conical(-pos, sᴵ)
-    if (ecl == 0.0)
-        # println("Eclipsed!")
+    sᴵₑ = sun_position(t)  # Sun-Earth vector
+    ecl = eclipse_conical(-pos, sᴵₑ)
+    if ecl > 0.98
+        ecl = 1.0
+    else
+        ecl = 0.0
     end
-    sᴵ = sᴵ - pos         # Sun-Sat vector
+    sᴵ = sᴵₑ - pos         # Sun-Sat vector
 
     albedo_matrix, junk = albedo(pos, sᴵ, alb.refl)
 
     sᴵ = ecl * (sᴵ) # / norm(sᴵ))
-
     Bᴵ = IGRF13(pos, t)
 
-    η_sun = I(3) #generate_noise_matrix(deg2rad(5.0), dt)
-    η_mag = I(3) #generate_noise_matrix(deg2rad(5.0), dt)
+    η_sun = generate_noise_matrix(deg2rad(3.0), dt) 
+    η_mag = generate_noise_matrix(deg2rad(3.0), dt)
 
-    sᴮ = η_sun * (ᴮRᴺ * (sᴵ))# / norm(sᴵ))) # (noisy) Sun vector in body frame
-    Bᴮ = η_mag * (ᴮRᴺ * (Bᴵ))# / norm(Bᴵ))) # (noisy) Mag vector in body frame
+    sᴮ = η_sun * (ᴮRᴵ * (sᴵ)) # (noisy) Sun vector in body frame     NOT REALLY USED...
+    Bᴮ = η_mag * (ᴮRᴵ * (Bᴵ)) # (noisy) Mag vector in body frame
 
-    𝐬ᴮ = η_sun * (ᴮRᴺ * (sᴵ / norm(sᴵ)))    # unit
-    𝐁ᴮ = η_mag * (ᴮRᴺ * (Bᴵ / norm(Bᴵ)))   # unit
+    𝐬ᴮ = ecl > 0.01 ? (η_sun * ecl * (ᴮRᴵ * (sᴵ / norm(sᴵ)))) :  [0.0; 0.0; 0.0]
+    # if ecl > 0.01
+    #     𝐬ᴮ = η_sun * ecl * (ᴮRᴵ * (sᴵ / norm(sᴵ)))    # unit
+    # else
+    #     𝐬ᴮ = [0.0; 0.0; 0.0]
+    # end
+
+    𝐁ᴮ = η_mag * (ᴮRᴵ * (Bᴵ / norm(Bᴵ)))   # unit
 
     num_diodes =  size(sat.diodes.calib_values, 1)
     current_vals = zeros(num_diodes) # Currents being generated by each photodiode
+    current_noises = zeros(num_diodes)
 
     ϵ = sat.diodes.elev_angles 
     α = sat.diodes.azi_angles
@@ -151,26 +176,42 @@ function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONS
         surface_normal = [(cos(ϵ[i])*cos(α[i])) (cos(ϵ[i])*sin(α[i])) sin(ϵ[i])]   # Photodiode surface normal 
         diode_albedo = compute_diode_albedo(albedo_matrix, alb.cell_centers_ecef, surface_normal, pos)
 
-        ##### ADD IN NOISE
-        current = (C[i] * surface_normal * 𝐬ᴮ) .+ (C[i] * diode_albedo / CONSTANTS._E_am0) # .+ σ_η_cur * randn() # Calculate current, including noise and Earth's albedo 
+        current = (C[i] * surface_normal * 𝐬ᴮ) .+ (C[i] * diode_albedo / CONSTANTS._E_am0) # Calculate current, including noise and Earth's albedo 
+        current_noise = rand(Normal(0.0, abs((0.05 * current[1]))))
+        current = current .+ current_noise # Generate noise that scales with magnitude of the current
 
         current_vals[i] = current[1] * ecl 
+        current_noises[i] = current_noise
     end
 
     current_vals[current_vals .< 0] .= 0 # Photodiodes don't generate negative current
 
     mag_calib_matrix = generate_mag_calib_matrix(sat)
 
-    Bᴮ = (mag_calib_matrix * Bᴮ) + sat.magnetometer.bias # IN BODY FRAME!
+    Bᴮ = (mag_calib_matrix * Bᴮ) + sat.magnetometer.bias
+    magnetometer_noise = 0.0 * norm(Bᴮ) * 0.02 * randn(3) # ALREADY ADDED ABOVE!
+    Bᴮ += magnetometer_noise # IN BODY FRAME! 
 
-    w̃ = x[11:13] + x[14:16] # + η
-    pos = x[1:3]
+    w̃ = x[11:13] + x[14:16] 
+    gyro_noise = deg2rad(2.0) * randn(3)  
+    w̃ += gyro_noise
+
+    pos = x[1:3] 
+    gps_noise = 0.0 * (5e4) * randn(3) 
+    pos += gps_noise
+
     sensors = SENSORS(Bᴮ, current_vals, w̃, pos)
-    truth = GROUND_TRUTH(t, Bᴵ, sᴵ, 𝐬ᴮ)
 
-    return truth, sensors 
+    Bᴮ_unadjusted = (ᴮRᴵ * (Bᴵ))
+    truth = GROUND_TRUTH(t, Bᴵ, sᴵ, 𝐬ᴮ, Bᴮ_unadjusted)
+    noise = NOISE(magnetometer_noise, current_noises,
+                    gyro_noise, gps_noise, 
+                    η_sun, η_mag)
+
+    return truth, sensors, ecl, noise
 end
-
+println("Low noise values in sim")
+println("Including bad noise in B^B!!")
 
     function generate_noise_matrix(σ, dt)
         """
@@ -188,7 +229,6 @@ end
             R = I(3)
         end
         
-        R = I(3)
         return R
     end
 

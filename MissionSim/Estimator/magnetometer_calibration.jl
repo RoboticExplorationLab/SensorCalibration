@@ -22,10 +22,15 @@ mag_field_pred_hist = 0
 curr_hist = 0 
 A = 0 
 stable_count = 0
+has_run = false
 ################
 
+function check_if_run()
+    return has_run
+end
+
 # Currently does NOT include time-varying current-induced bias (assume we turn off everything while calibrating) -> Check out initial commit for version with currents included 
-function estimate_vals(sat::SATELLITE, data::MAG_CALIB, estimate_flag)
+function estimate_vals(sat::SATELLITE, data::MAG_CALIB, estimate_flag::Bool)
     """ Sat ESTIMATE not truth """
 
     if isempty(size(mag_field_meas_hist))  # Initialize   
@@ -40,81 +45,56 @@ function estimate_vals(sat::SATELLITE, data::MAG_CALIB, estimate_flag)
         global A = [A; new_row]
     end
 
-
-
-    # If we have enough data to math... (get ~1 orbit first)
-    if estimate_flag #(size(A, 1) > 5749) #&& ((size(A,1) % 360) == 0) # Needs to be overconstrained, and GN is slow so do it periodically 
-
-
-        params = A \ mag_field_meas_hist 
-        
-        params = gauss_newton(params, data)
-
-        mag_calib_matrix_est, β = parameters_to_matrix_bias(params)
-        bx_est, by_est, bz_est = β[:]
-
-        if mag_calib_matrix_est[3,3] < 0
-            mag_calib_matrix_est[3,3] = -mag_calib_matrix_est[3,3]
-        end
-        if mag_calib_matrix_est[2,2] < 0 
-            mag_calib_matrix_est[2,2] = -mag_calib_matrix_est[2,2]
-            mag_calib_matrix_est[3,2] = -mag_calib_matrix_est[3,2]
-        end
-        if mag_calib_matrix_est[1,1] < 0
-            mag_calib_matrix_est[:, 1] = -mag_calib_matrix_est[:, 1]
-            # println("Error! Scale factor cannot be negative!")
-            # global stable_count = 0 # BAD not 100% sure if i can just flip all of the first column
-            # break
-        end
-
-        a_est, b_est, c_est, ρ_est, λ_est, ϕ_est = extract_parameters(mag_calib_matrix_est)
-
-        if (abs(ρ_est) > pi/3) || (abs(λ_est) > pi/3) || (abs(ϕ_est) > pi/3)
-            println("Error with major non-ortho angles!")
-            println("$ρ_est  |  $λ_est  |  $ϕ_est")
-        end
-
-        # # Check for change 
-        # δscale_factors = sum(abs.(sat.magnetometer.scale_factors - [a_est, b_est, c_est]))
-        # δnon_ortho = sum(abs.(sat.magnetometer.non_ortho_angles - [ρ_est, λ_est, ϕ_est]))
-        # δbias = sum(abs.(sat.magnetometer.bias - [bx_est, by_est, bz_est]))
-
-
-        # if (δscale_factors < 0.05) && (δnon_ortho < 0.05) && (δbias < 0.05) 
-        #     global stable_count += 1
-        #     # println("Stable!")
-        # else
-        #     global stable_count = 0
-        # end
-
-        # if stable_count > 1
-        #     # println("FINISHED Mag Calib!")
-        #     finished = true 
-        # else 
-        #     finished = false 
-        # end
-
-        # UPDATE SATELLITE ESTIMATES
-        updated_magnetometer_est = MAGNETOMETER([a_est, b_est, c_est],     # NONE should be negative
-                                                [ρ_est, λ_est, ϕ_est],     # NONE should be | | > pi/2 (or even close)
-                                                [bx_est, by_est, bz_est] )
-        sat.magnetometer = updated_magnetometer_est
-
-
-        # PLOT IF FINISHED??
-
-        finished = true
-        return sat, data, finished
+    if estimate_flag 
+        return run_gn(sat, data)
     end
 
     # Otherwise
-    return sat, data, false
+    return sat, data
 end
 
 function initialize(data::MAG_CALIB)
     return data
 end
 
+function run_gn(sat, data)
+    global has_run = true
+    params = A \ mag_field_meas_hist 
+        
+    params = gauss_newton(params)
+
+    mag_calib_matrix_est, β = parameters_to_matrix_bias(params)
+    bx_est, by_est, bz_est = β[:]
+
+    if mag_calib_matrix_est[3,3] < 0
+        mag_calib_matrix_est[3,3] = -mag_calib_matrix_est[3,3]
+    end
+    if mag_calib_matrix_est[2,2] < 0 
+        mag_calib_matrix_est[2,2] = -mag_calib_matrix_est[2,2]
+        mag_calib_matrix_est[3,2] = -mag_calib_matrix_est[3,2]
+    end
+    if mag_calib_matrix_est[1,1] < 0
+        mag_calib_matrix_est[:, 1] = -mag_calib_matrix_est[:, 1]
+    end
+
+    a_est, b_est, c_est, ρ_est, λ_est, ϕ_est = extract_parameters(mag_calib_matrix_est)
+
+    if (abs(ρ_est) > pi/3) || (abs(λ_est) > pi/3) || (abs(ϕ_est) > pi/3)
+        println("Error with major non-ortho angles!")
+        finished = false
+    else
+        finished = true
+    end
+
+
+    # UPDATE SATELLITE ESTIMATES
+    updated_magnetometer_est = MAGNETOMETER([a_est, b_est, c_est],     # NONE should be negative
+                                            [ρ_est, λ_est, ϕ_est],     # NONE should be | | > pi/2 (or even close)
+                                            [bx_est, by_est, bz_est] )
+    sat.magnetometer = updated_magnetometer_est
+
+    return sat, data#, finished 
+end
 
 #########################
 function new_mag_calib()
@@ -187,7 +167,7 @@ end
         return reshape(r, length(r))
     end
 
-    function gauss_newton(x0, data::MAG_CALIB)
+    function gauss_newton(x0)
         """Gauss-Newton for batch estimation"""
 
         # copy initial guess
