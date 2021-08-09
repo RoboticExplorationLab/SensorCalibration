@@ -6,14 +6,14 @@ final_count = 0
 
 # Should we prevent it from getting stuck in "detumble" endlessly?
 
-println("Find a better way to count for non-orthogonal angles error")
-function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, current_data, t, satellite_estimate)
+println("Using sᴮ truth")
+function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, current_data, t, satellite_estimate, sᴮ_truth)
     #flags:= {in_sun, magnetometer_calibrated, diodes_calibrated, calibrating, detumbling}
     # Don't like data_structure names for estimators, or order of DIODE_CALIB
 
     ŝᴵ = sun_position(t) - sens.gps     # Estimated sun vector 
     B̂ᴵ = IGRF13(sens.gps, t)            # Estimated magnetic field vector
-    𝐬̂ᴮ =  estimate_sun_vector(sens, satellite_estimate)
+    𝐬̂ᴮ = estimate_sun_vector(sens, satellite_estimate)
     Bᴮ = sens.magnetometer      # SHOULD BE A tilde
 
     if flags.magnetometer_calibrated
@@ -23,18 +23,10 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
 
     if flags.diodes_calibrated && flags.magnetometer_calibrated
         global final_count += 1
-        if final_count > 100
+        if final_count > 5000
             return finished, TRIVIAL(1.0), TRIVIAL(1.0), flags
         end
     end
-
-    if flags.calibrating && flags.magnetometer_calibrated # AKA Calibrating DIODES
-        global temp_count += 1
-    end
-
-    # if flags.magnetometer_calibrated
-    #     return finished, TRIVIAL(1.0), TRIVIAL(1.0), flags
-    # end
 
 
 
@@ -44,7 +36,6 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
     ###########################################
 
     if flags.detumbling 
-        # print("\rDetumbling $iteration")
         if flags.diodes_calibrated
             temp = deepcopy(sens)
             temp.gyro = temp.gyro - satellite_estimate.state[5:7] # current_data.sat_state[5:7]
@@ -65,28 +56,31 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
                 Bᴮ = correct_mag_field(satellite_estimate, sens.magnetometer)  # If it is now calibrated, correct Bᴮ 
                 # return finished, TRIVIAL(1.0), TRIVIAL(1.0), flags 
             end       
-        else # Calibrating DIODES   
+        else #if !flags.diodes_calibrated # Calibrating DIODES   
             # DONT LIKE THIS METHOD FOR CHECKING FINISHED!
             if sum(abs.(sens.diodes)) > eclipse_threshold # If still in sun
                 temp = 0
-                if check_if_finished(current_data) # diodes -> Do we need to enforce one sunlight-orbit...?
+                if check_if_finished(current_data, satellite_estimate) # diodes -> Do we need to enforce one sunlight-orbit...?
                     flags.calibrating, flags.diodes_calibrated = false, true
                 end
             else
                 flags.in_sun = false 
                 flags.calibrating = false
             end
+        # else
+        #     tttt = 5
         end
 
         if flags.calibrating  # If still not done calibrating...
             if !flags.magnetometer_calibrated # Continue calibrating magnetometer
                 mode, cont, est = mag_cal, TRIVIAL(0.0), MAG_CALIB(Bᴮ, B̂ᴵ)
-            else # Continue calibrating diodes
+            
+            else #if !flags.diodes_calibrated # Continue calibrating diodes
                 mode, cont = diode_cal, TRIVIAL(0.0)
 
                 est = DIODE_CALIB(albedo,                       # Albedo
                                     current_data.sat_state,     # Satellite State
-                                    current_data.covariance,    # Filter Covariance 
+                                    # current_data.covariance,    # Filter Covariance 
                                     [ŝᴵ B̂ᴵ]',                   # Vectors in Inertial Frame
                                     sens.gyro,                  # Angular Velocity, ω
                                     [𝐬̂ᴮ Bᴮ]',                   # Vectors in Body Frame
@@ -118,8 +112,7 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
     ecl = eclipse_conical(-sens.gps, sᴵ_unscaled)
 
 
-
-    if ((flags.diodes_calibrated) && (norm(ω) > deg2rad(10.0))) || ((!flags.diodes_calibrated) && (norm(ω) > deg2rad(30.0)))
+    if ((flags.diodes_calibrated) && (norm(ω) > deg2rad(15.0))) || ((!flags.diodes_calibrated) && (norm(ω) > deg2rad(30.0)))
         mode = detumble
         cont = DETUMBLER(sens.gyro, Bᴮ, system._dt)  
         est = TRIVIAL(0.0)
@@ -132,7 +125,7 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
         est = MAG_CALIB(Bᴮ, B̂ᴵ)
         flags.calibrating = true
 
-    elseif (norm(𝐬̂ᴮ) > eclipse_threshold) # sum(abs.(sens.diodes)) > eclipse_threshold # in sun -> Make consistent across everything?
+    elseif (norm(𝐬̂ᴮ) > eclipse_threshold) # in sun -> Make consistent across everything!
 
         if (ecl < 0.9)
             println("ERROR!: ecl: $ecl but s = ", norm(𝐬̂ᴮ), " at time $t")
@@ -141,8 +134,7 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
         flags.in_sun = true 
         if !flags.diodes_calibrated
             ### CALIBRATE DIODES
-            q, R = triad(ŝᴵ, B̂ᴵ, 𝐬̂ᴮ, Bᴮ) # Normalizes all input vectors
-            # q = q_true; println("Using true q to init");
+            q, R = triad(ŝᴵ, B̂ᴵ, 𝐬̂ᴮ, Bᴮ) # Normalizes all input Vectors
             mode = diode_cal 
             cont = TRIVIAL(0.0)
 
@@ -159,11 +151,27 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
 
             flags.calibrating = true
             global temp_count = 0 # Ensures that everytime you enter into sun you give yourself a second to calm before finishing
-        else ### DO NOTHING UNTIL SUN RETURNS
-            print("\rChlling in sun")
-            mode = chill   #  MEKF, chill for now
+        else 
+            mode = mekf 
+            q, R = triad(ŝᴵ, B̂ᴵ, 𝐬̂ᴮ, Bᴮ)
+            if isa(current_data, DIODE_CALIB) # Finished diode cal during sunlit cycle 
+                # est = new_mekf(current_data)  
+                est = new_mekf(albedo, sens, system, q, satellite_estimate)
+            elseif isa(current_data, MEKF)
+                est = current_data
+            else    # Starting out of an eclipse 
+                est = new_mekf(albedo, sens, system, q, satellite_estimate)
+            end
+
+            # est = new_diode_calib(albedo, sens, system, q, satellite_estimate)
+            est.inertial_vecs = [ŝᴵ B̂ᴵ]'
+            est.body_vecs = [𝐬̂ᴮ Bᴮ]'
+            est.current_meas = sens.diodes
+            est.pos = sens.gps
+            est.ang_vel = sens.gyro
+
+
             cont = TRIVIAL(0.0)
-            est = TRIVIAL(0.0) 
             flags.calibrating = false
         end
 
@@ -186,7 +194,6 @@ end
 
 
 # HELPER  Functions
-println("Estimate Sun vector using the +ŷ rotation")
 function estimate_sun_vector(sens::SENSORS, sat_est::SATELLITE)
     if norm(sens.diodes) > eclipse_threshold  # If not eclipsed
         x₁ = (sens.diodes[1]/sat_est.diodes.calib_values[1])
@@ -199,14 +206,14 @@ function estimate_sun_vector(sens::SENSORS, sat_est::SATELLITE)
         # sun_vec_est = [x₁ - x₂;
         #                 y₁ - y₂;
         #                 z₁ - z₂]
-        # # sun_vec_est = [ (sens.diodes[1]/sat_est.diodes.calib_values[1]) - (sens.diodes[2]/sat_est.diodes.calib_values[2]);
-        # #                 (sens.diodes[3]/sat_est.diodes.calib_values[3]) - (sens.diodes[4]/sat_est.diodes.calib_values[4]);
-        # #                 (sens.diodes[5]/sat_est.diodes.calib_values[5]) - (sens.diodes[6]/sat_est.diodes.calib_values[6])]
+        # sun_vec_est = [ (sens.diodes[1]/sat_est.diodes.calib_values[1]) - (sens.diodes[2]/sat_est.diodes.calib_values[2]);
+        #                 (sens.diodes[3]/sat_est.diodes.calib_values[3]) - (sens.diodes[4]/sat_est.diodes.calib_values[4]);
+        #                 (sens.diodes[5]/sat_est.diodes.calib_values[5]) - (sens.diodes[6]/sat_est.diodes.calib_values[6])]
 
 
         sun_vec_est = [(x₁*cos(-pi/4) + z₁*cos(pi/4) + x₂*cos(3*pi/4) + z₂*cos(-3*pi/4));    #(z₁*cos(pi/4) + x₂*cos(3*pi/4) + z₂*cos(5*pi/4) + x₁*cos(7*pi/4))
                         y₁ - y₂;
-                        (x₁*cos(3*pi/4) + z₁*cos(pi/4) + x₂*cos(-pi/4) + z₂*cos(-3*pi/4))] # -(x₁*cos(pi/4) + z₁*cos(3*pi/4) + x₂*cos(5*pi/4) + z₂*cos(7*pi/4))]    
+                       (x₁*cos(3*pi/4) + z₁*cos(pi/4) + x₂*cos(-pi/4) + z₂*cos(-3*pi/4))] # -(x₁*cos(pi/4) + z₁*cos(3*pi/4) + x₂*cos(5*pi/4) + z₂*cos(7*pi/4))]    
 
         sun_vec_est /= norm(sun_vec_est)
     else
@@ -216,6 +223,8 @@ function estimate_sun_vector(sens::SENSORS, sat_est::SATELLITE)
         
     return sun_vec_est # Unit - ŝᴮ
 end
+
+
 function correct_mag_field(sat, B̃ᴮ)
     """ Uses magnetometer calibration stuff to fix Bᴮ using sat ESTIMATE! """
     # Generate T, Bias from sat 
@@ -233,6 +242,15 @@ function correct_mag_field(sat, B̃ᴮ)
 end
 
 function triad(r₁ᴵ,r₂ᴵ,r₁ᴮ,r₂ᴮ)
+    """
+        (Summary)
+
+        Arguments:
+            - 
+
+        Returns:
+            -
+    """
     # Method for estimating the rotation matrix between two reference frames 
     #   Relies only on a single pair of vectors in each frame
     # Inputs: 
@@ -290,7 +308,7 @@ function check_if_finished(sat_est::SATELLITE)
     end
 end
 
-# For photodiodes
-function check_if_finished(data::DIODE_CALIB)
-    return (norm(data.covariance) < 0.006) #7)
+# For photodiodes ( combine with detumbler)
+function check_if_finished(data::DIODE_CALIB, sat_est::SATELLITE)
+    return (norm(sat_est.covariance) < 0.0065) #7)
 end

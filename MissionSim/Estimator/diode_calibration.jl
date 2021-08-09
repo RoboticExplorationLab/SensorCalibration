@@ -7,32 +7,34 @@ using Infiltrator
 
 mutable struct DIODE_CALIB 
     albedo::ALBEDO        
-    sat_state     # x
-    covariance    # P
+    sat_state     # x (Full)
+    # covariance    # P
     inertial_vecs # rᴵ
     ang_vel       # ω
     body_vecs     # rᴮ
     current_meas  # y 
     W   # noise 1, 2
     V
-
     dt 
     time 
     num_diodes 
     pos
-
     first_pass # bool flag
 end
 
 function estimate_vals(sat::SATELLITE, data::DIODE_CALIB)
     """
-        (SUMMARY)
+        (Summary)
 
-        sat ESTIMATE
+        Arguments:
+            - sat ESTIMATE
+
+        Returns:
+            -
     """
-    
+    i = data.num_diodes
     data.time = (data.dt + data.time)  # - dt? Need offset of one?
-    new_state, new_covariance = mekf(data.sat_state, data.covariance, data.W, data.V,
+    new_state, new_covariance = mekf(data.sat_state, sat.covariance, data.W, data.V,   # CHANGED data. -> sat.
                                         data.inertial_vecs, data.ang_vel, data.body_vecs, 
                                         data.current_meas, data.num_diodes, data.pos, data.dt, 
                                         data.time, data.albedo)
@@ -46,9 +48,10 @@ function estimate_vals(sat::SATELLITE, data::DIODE_CALIB)
     sat.diodes = diodes
 
     data.sat_state = new_state 
-    data.covariance = new_covariance 
+    # data.covariance = new_covariance 
 
-    sat.state = new_state[1:7] # Only tracking the non-calibration states
+    sat.state = new_state[1:7] # Only tracking the non-calibration states here
+    sat.covariance = new_covariance
 
     return sat, data 
 end
@@ -59,7 +62,7 @@ function initialize(albedo, state, system)
         sat_state = [state[7:10][:]; zeros(21)[:]]
         d = DIODE_CALIB(albedo,
                         sat_state, #sat_state, # NOT the same as x0
-                        0.0, # Just empty stuff to be filled in 
+                        # 0.0, # Just empty stuff to be filled in 
                         0.0, # UPDATE with rᴵ
                         state[11:13], # angular velocity 
                         0.0, # UPDATE with rᴮ
@@ -75,12 +78,20 @@ function initialize(albedo, state, system)
 end
 
 println("Need to fix covariance in new_diode_calib")
-println("Add in VANILLA MEKF")
 function new_diode_calib(albedo, sens::SENSORS, system, q, sat) 
+    """
+        (Summary)
+
+        Arguments:
+            - 
+
+        Returns:
+            -
+    """
     sat_state = zeros(7 + 3 * system._num_diodes)
     data = DIODE_CALIB(albedo,
                         sat_state, # NOT the same as x0
-                        0.0, # UPDATE with covariance  <---- does this need to be reset or passed on through eclipse?
+                        # 0.0, # UPDATE with covariance  <---- does this need to be reset or passed on through eclipse?
                         0.0, # UPDATE with rᴵ
                         sens.gyro, # angular velocity 
                         0.0, # UPDATE with rᴮ
@@ -102,11 +113,16 @@ function new_diode_calib(albedo, sens::SENSORS, system, q, sat)
     σ_c = 0.2 #0.15
     σ_α = 1.0 #deg2rad(2.0) #1.0;
     σ_ϵ = 0.3 #deg2rad(2.0) #0.3
-    p = [σ_q * ones(3); σ_β * ones(3); σ_c * ones(data.num_diodes); σ_α*ones(data.num_diodes); σ_ϵ*ones(data.num_diodes)].^2
-    P₀ = diagm(p)
 
-    # TRY !!
-    # P₀ = (10 * pi / 180)^2 * I(6 + 3*6)
+    if isnan(sat.covariance[1,1]) # First time
+        p = [σ_q * ones(3); σ_β * ones(3); σ_c * ones(data.num_diodes); σ_α*ones(data.num_diodes); σ_ϵ*ones(data.num_diodes)].^2
+        P₀ = diagm(p)
+    else 
+        p = [σ_q * ones(3); σ_β * ones(3)].^2   # Reset Attitude and Bias covariance
+        P_new = diagm(p)
+        P₀ = sat.covariance 
+        P₀[1:6, 1:6] = P_new # Keep calibration covariances
+    end
 
     estimator_params = (angle_random_walk      = 0.06,   # in deg/sqrt(hour)   
                         gyro_bias_instability  = 0.8,    # Bias instability in deg/hour
@@ -124,11 +140,10 @@ function new_diode_calib(albedo, sens::SENSORS, system, q, sat)
     σ_sunVec = deg2rad(5.0); σ_magVec = deg2rad(5.0); σ_curr = 0.008; #3, 3, 0.005
 
     W = Diagonal([σ_orient * ones(3); σ_bias * ones(3); σ_cal * ones(data.num_diodes); σ_azi * ones(data.num_diodes); σ_ele * ones(data.num_diodes)])
-    # V = Diagonal([σ_sunVec * ones(3); σ_magVec * ones(3); σ_curr * ones(data.num_diodes)])
     V = Diagonal([σ_magVec * ones(3); σ_curr * ones(data.num_diodes)])
     
     data.sat_state = x₀
-    data.covariance = P₀
+    sat.covariance = P₀
     data.W = W 
     data.V = V
 
@@ -138,6 +153,15 @@ function new_diode_calib(albedo, sens::SENSORS, system, q, sat)
 end
 
     function mekf(x, P, W, V, rᴵ, w, rᴮ,  y, _num_diodes, pos, dt, time, alb::ALBEDO)
+        """
+            (Summary)
+
+            Arguments:
+                - 
+
+            Returns:
+                -
+        """
         # Runs a single step of a multiplicative extended Kalman filter. 
         #   (Note that the code currently assumes no correlation at all in noise matrix)
         #   returns the next x and P values 
@@ -164,15 +188,8 @@ end
         C = Array{Float64}(undef, 0, size(P_p,1))
         Vs = Array{Float64}(undef)  ## ASSUMES NO CORRELATION AT ALL !!
 
-        # if false #!eclipse  #  Sun Vector measurement
-            #     V_sun = V[1:3, 1:3]; 
-            #     yp_sun, C_sun = sun_measurement(x_p, rᴵ[1, :], _num_diodes) 
-            #     z_sun = rᴮ[1,:]  - yp_sun
-            #     z = [z[:]; z_sun[:]]
-            #     C = [C; C_sun]
-            #     Vs = [Vs[:]; diag(V_sun)[:]]  # Does this need Vs[:]?
-        # end
 
+        # of statements no longer needed!
         if true            #  Magnetic Field measurement
             V_mag = V[1:3, 1:3];
             yp_mag, C_mag = mag_measurement(x_p, 𝐁ᴵ, _num_diodes)   
@@ -194,7 +211,7 @@ end
         # Innovation   
         # Vs = Vs[2:end] # Get rid of the initial 0 term  
         Vk = Diagonal(Vs) 
-        S = C*P_p*C' + Vk;  
+        S = C*P_p*C' + Vk; 
 
         if rank(S) != size(S, 1)
             @infiltrate 
@@ -223,44 +240,16 @@ end
         return x_next, P_next
     end
 
-        function sun_measurement(x, sN, i)
-            # Generates the "measured" body vector from the sun vector
-            #      (What our measurement would be given our estimated attitude)
-            # Inputs:
-            #   - x: Current state of the satellite 
-            #           ([q⃗, q0] β⃗ C⃗ α⃗ ϵ⃗)                                    |  [6 + 3i,]
-            #   - sN: Unit sun vector in the newtonian (inertial) frame      |  [3,]
-            #   - i: Number of diodes                                        |  (scalar)
-            # Outputs:
-            #   - y: Unit vector in body frame corresponding to sN & q       |  [3,]
-            #   - H: Jacobian of y with respect to x
-            #           dy/dx = [dy/dPhi; dy/dBeta; ...]                     |  [3 x 6 + 3i]
-
-
-            x = x[:]
-            q = x[1:4]
-            β = x[5:7]
-            c = x[8:(7+i)]  
-            α = x[(8+i):(7+2*i)]
-            ϵ = x[(8+2*i):end]
-
-            B_Q_N = dcm_from_q(q)'; # DCM from quaternion (flipped)   TODO why flipped?    
-            sB = B_Q_N*sN;  # this is what the sun measurement would be given our estimated attitude
-
-            sB_hat = hat(sB); 
-            ∂θ = sB_hat 
-            ∂β = zeros(3, 3)
-            ∂C = zeros(3, i)
-            ∂α = zeros(3, i)
-            ∂ϵ = zeros(3, i)
-
-            H = [∂θ ∂β ∂C ∂α ∂ϵ]; # [3 x 6 + 3i]
-            y = sB[:]             # [3 x 1]
-
-            return y, H
-        end
-
         function mag_measurement(x, 𝐁ᴵ, i)
+            """
+                (Summary)
+
+                Arguments:
+                    - 
+
+                Returns:
+                    -
+            """
             # Generates the "measured" body vector from the magnetic field vector
             #      (What our measurement would be given our estimated attitude)
             # Inputs:
@@ -299,6 +288,15 @@ end
         end
 
         function current_measurement(x, 𝐬ᴵ, i, ecl, pos, time, alb::ALBEDO)
+            """
+                (Summary)
+
+                Arguments:
+                    - 
+
+                Returns:
+                    -
+            """
             # Generates the "measured" current values from the sun vector
             #      (What our measurement would be given our sun vector)
             # Inputs:
@@ -372,6 +370,15 @@ end
         end
 
         function prediction(xk, w, dt, numDiodes)
+            """
+                (Summary)
+
+                Arguments:
+                    - 
+
+                Returns:
+                    -
+            """
             # Predicts next state using current state and angular velocity
             #
             # Arguments:

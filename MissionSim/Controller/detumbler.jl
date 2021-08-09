@@ -11,7 +11,7 @@ end
 
 B_last = [0 0 0]
 first_time = true
-println("Ḃ Detumbler still doesn't work, k is fixed, and could probably account for bias...")
+# println("Ḃ Detumbler still doesn't work, k is fixed, and could probably account for bias...")
 
 function __init__()
     py"""

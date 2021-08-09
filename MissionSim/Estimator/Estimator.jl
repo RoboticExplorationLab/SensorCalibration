@@ -15,6 +15,7 @@ export estimate_vals
 export initialize
 export save_global_variables ## REMOVE
 export new_diode_calib
+export new_mekf
 
 export check_if_run # # # # #
 

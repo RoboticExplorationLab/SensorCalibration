@@ -26,8 +26,9 @@ mutable struct SATELLITE
     magnetometer::MAGNETOMETER            # Mag calibration values      |   [3, 3, 3, 3 x number of diodes]
     diodes::DIODES                        # Diode calibration values 
     state #::Array{<:Real, 1}               # Satellite State             | [q⃗ q₀ β⃗]
+    covariance#::Array{Float64, 2}
 end
-Base.deepcopy(s::SATELLITE) = SATELLITE(deepcopy(s.J), deepcopy(s.magnetometer), deepcopy(s.diodes), deepcopy(s.state))
+Base.deepcopy(s::SATELLITE) = SATELLITE(deepcopy(s.J), deepcopy(s.magnetometer), deepcopy(s.diodes), deepcopy(s.state), deepcopy(s.covariance))
 
 mutable struct SENSORS # SHOULD THESE BE UNIT or nah?
     magnetometer::Array{Float64, 1}  # Bᴮ
@@ -70,6 +71,7 @@ mutable struct FLAGS
     diodes_calibrated::Bool
     detumbling::Bool
     calibrating::Bool
+    mekfing::Bool
 end
 
 

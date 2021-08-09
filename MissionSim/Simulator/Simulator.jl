@@ -25,7 +25,6 @@ struct SIM # For now, just used for multiple dispatch
     junk
 end
 
-println("Google an appropriate bias sigma, and noise matrix sigma AND all noise actually ")
 function dynamics(sat::SATELLITE, x, u, t)
     """ Propagates state dynamics.  Called in _____. Assumes t includes epoch already """
 
@@ -41,7 +40,6 @@ function dynamics(sat::SATELLITE, x, u, t)
 
     J = sat.J
     ẇ = (J^(-1)) * (u - cross(w, (J*w)))
-    # ẇ = J \ (u - cross(w, J*w))
 
     σβ = deg2rad(0.22)  #0.22
     δβ = 0.25 * σβ * randn(3)  #β̇  looks funny so I am using δ
@@ -108,7 +106,6 @@ end
 
 # Still relies on old faulty eclipse
 println("IN SIM: ecl is being rounded - shouldn't round here")
-# @warn "Sim still relies on old faulty eclipse function!"
 function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONSTANTS, dt)
     """ 
         Generates sensor measurements, including noise.
@@ -150,18 +147,13 @@ function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONS
     sᴵ = ecl * (sᴵ) # / norm(sᴵ))
     Bᴵ = IGRF13(pos, t)
 
-    η_sun = generate_noise_matrix(deg2rad(3.0), dt) 
+    η_sun = generate_noise_matrix(deg2rad(3.0), dt)  # Not really used...
     η_mag = generate_noise_matrix(deg2rad(3.0), dt)
 
-    sᴮ = η_sun * (ᴮRᴵ * (sᴵ)) # (noisy) Sun vector in body frame     NOT REALLY USED...
+    sᴮ = η_sun * (ᴮRᴵ * (sᴵ)) # (noisy) Sun vector in body frame     Also not really used...
     Bᴮ = η_mag * (ᴮRᴵ * (Bᴵ)) # (noisy) Mag vector in body frame
 
     𝐬ᴮ = ecl > 0.01 ? (η_sun * ecl * (ᴮRᴵ * (sᴵ / norm(sᴵ)))) :  [0.0; 0.0; 0.0]
-    # if ecl > 0.01
-    #     𝐬ᴮ = η_sun * ecl * (ᴮRᴵ * (sᴵ / norm(sᴵ)))    # unit
-    # else
-    #     𝐬ᴮ = [0.0; 0.0; 0.0]
-    # end
 
     𝐁ᴮ = η_mag * (ᴮRᴵ * (Bᴵ / norm(Bᴵ)))   # unit
 
@@ -193,16 +185,16 @@ function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONS
     Bᴮ += magnetometer_noise # IN BODY FRAME! 
 
     w̃ = x[11:13] + x[14:16] 
-    gyro_noise = deg2rad(2.0) * randn(3)  
+    gyro_noise = 0.1 * deg2rad(1.0) * randn(3)  
     w̃ += gyro_noise
 
     pos = x[1:3] 
-    gps_noise = 0.0 * (5e4) * randn(3) 
+    gps_noise = (5e4) * randn(3) 
     pos += gps_noise
 
-    sensors = SENSORS(Bᴮ, current_vals, w̃, pos)
-
     Bᴮ_unadjusted = (ᴮRᴵ * (Bᴵ))
+
+    sensors = SENSORS(Bᴮ, current_vals, w̃, pos)
     truth = GROUND_TRUTH(t, Bᴵ, sᴵ, 𝐬ᴮ, Bᴮ_unadjusted)
     noise = NOISE(magnetometer_noise, current_noises,
                     gyro_noise, gps_noise, 
@@ -210,8 +202,7 @@ function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONS
 
     return truth, sensors, ecl, noise
 end
-println("Low noise values in sim")
-println("Including bad noise in B^B!!")
+
 
     function generate_noise_matrix(σ, dt)
         """

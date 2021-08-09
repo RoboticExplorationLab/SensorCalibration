@@ -12,7 +12,7 @@ using JLD2
 using Infiltrator
 
 using Random
-# Random.seed!(4321) # 1234  | Alt: 4321
+# Random.seed!(12344) # 1234  | Alt: 4321
 
 include("mag_field.jl")            # Contains IGRF13 stuff
 include("rotationFunctions.jl")    # Contains general functions for working with quaternions
@@ -28,7 +28,7 @@ include("state_machine.jl")
 
 __init__() # Generates PyCall commands
 
-@enum(Operation_mode, mag_cal = 1, detumble, diode_cal, full_control, finished, chill)
+@enum(Operation_mode, mag_cal = 1, detumble, diode_cal, full_control, mekf, finished, chill)
 Base.to_index(s::Operation_mode) = Int(s)
 
 function report_on_magnetometer(truth::SATELLITE, est::SATELLITE, init::SATELLITE, sens_hist, truth_hist)
@@ -84,7 +84,7 @@ function report_on_magnetometer(truth::SATELLITE, est::SATELLITE, init::SATELLIT
     err_og = B̃ᴮ - Bᴮ 
     err_og_mag  = [norm(B̃ᴮ[:, i] - Bᴮ[:, i]) for i = 1:N]
     erro = plot(err_og', title = "Errors", label = ["x" "y" "z"], color = [:red :blue :green])
-        erro = plot!(err_og_mag, linewidth = 2, linestyle = :dash, color = :black)
+        erro = plot!(err_og_mag, linewidth = 1, linestyle = :dash, color = :black)
 
     display(plot(og, erro, layout = (2,1)))
 end
@@ -183,11 +183,14 @@ run_folder = "garbage/"  # DONT FORGET TO UPDATE COVARIANCES TOO!
 function main()
     println("Initializing Values")
 
+    # satellite_truth = generate_true_satellite()
+
     # Generate our satellite 
     magnetometer = MAGNETOMETER([_a, _b, _c], [_ρ, _λ, _ϕ], [_βx₀, _βy₀, _βz₀]) 
     diodes = DIODES(_sensor_scale_factors, _azi_angles, _elev_angles)
     initial_state = [q0[:]; β0[:]]
-    satellite_truth = SATELLITE(_J, magnetometer, diodes, initial_state) 
+    initial_covariance = NaN * ones((3 + 3 + 3 * _num_diodes))
+    satellite_truth = SATELLITE(_J, magnetometer, diodes, initial_state, initial_covariance) 
 
     operation_mode = mag_cal    
 
@@ -204,7 +207,7 @@ function main()
     d = initialize(satellite_truth, d) 
     _̂J = _J
     state_est = [0 0 0 1 0 0 0]  # Assume no bias and unit rotation
-    satellite_estimate = SATELLITE(_̂J, m, d, state_est) # Jhat = J for now
+    satellite_estimate = SATELLITE(_̂J, m, d, state_est, initial_covariance) # Jhat = J for now
 
     estimates_hist = Array{SATELLITE,1}(undef, _max_sim_length)
     sensors_hist = Array{SENSORS, 1}(undef, _max_sim_length)
@@ -215,7 +218,8 @@ function main()
         new_sat = SATELLITE(_̂J, 
                     MAGNETOMETER(zeros(3), zeros(3), zeros(3)),
                     DIODES(zeros(_num_diodes), zeros(_num_diodes), zeros(_num_diodes)),
-                    state_est)
+                    state_est,
+                    initial_covariance)
         estimates_hist[i] = new_sat
 
         new_sens = SENSORS(zeros(3), zeros(_num_diodes), zeros(3), zeros(3))
@@ -248,17 +252,16 @@ function main()
     cov_hist = zeros(24, 24, _max_sim_length)
     ecl_hist = zeros(_max_sim_length)
 
-
-
-
-
-
     updated_data = MAG_CALIB(0.0, 0.0)
-    # updated_data = initialize(albedo, x0, SYSTEM)
-    # satellite_estimate.magnetometer = satellite_truth.magnetometer  
-    flags = FLAGS(false, false, false, false, false)
+    updated_data = initialize(albedo, x0, SYSTEM)
+    satellite_estimate.magnetometer = satellite_truth.magnetometer  
+
+    # satellite_estimate.diodes = satellite_truth.diodes
+    flags = FLAGS(false, true, false, false, false, false)
+    mode_hist = zeros(_max_sim_length)
 
 
+    count = 0
     # Design alternative with if/else structure instead of uniformity to compare complexity 
     try 
         for i = 1:_max_sim_length
@@ -268,10 +271,9 @@ function main()
             truth, sensors, ecl, noise = generate_measurements(sim, satellite_truth, albedo, state, t, CONSTANTS, _dt)
 
             old_op = operation_mode
-            q_true = state[7:10]
-            ŝᴮ_true = truth.ŝᴮ_hist
+            sᴮ_truth = truth.ŝᴮ_hist
             
-            operation_mode, controller, estimator, flags = update_operation_mode(flags, sensors, SYSTEM, albedo, updated_data, t, satellite_estimate)
+            operation_mode, controller, estimator, flags = update_operation_mode(flags, sensors, SYSTEM, albedo, updated_data, t, satellite_estimate, sᴮ_truth)
             if old_op != operation_mode
                 println("Switched from $old_op to $operation_mode at $i ")
                 if (old_op == mag_cal) & (i > 3000)
@@ -307,10 +309,11 @@ function main()
             estimates_hist[i] = deepcopy(satellite_estimate)
             ecl_hist[i] = ecl
             noise_hist[i] = noise
+            mode_hist[i] = Int(operation_mode)
 
             if operation_mode == diode_cal 
-                cov_hist[:,:,i] = updated_data.covariance
-                temp = norm(updated_data.covariance)
+                cov_hist[:,:,i] = satellite_estimate.covariance
+                temp = norm(satellite_estimate.covariance)
             end
 
             if operation_mode == finished
@@ -327,7 +330,7 @@ function main()
             end
 
             disp_elev = round.(rad2deg.(satellite_estimate.diodes.elev_angles), sigdigits = 3)
-            disp_azi  = round.(rad2deg.(satellite_estimate.diodes.azi_angles), sigdigits = 3)
+            disp_azi  = round.(rad2deg.(satellite_estimate.diodes.azi_angles ), sigdigits = 3)
             disp_cur  = round.(sensors.diodes, sigdigits = 3)
             if operation_mode == diode_cal
                 notes = string("Ecl: $ecl \t| ||COV||: $temp   \t| Diode Currents: $disp_cur") #ϵ: $disp_elev   \t| α: $disp_azi")
@@ -338,24 +341,30 @@ function main()
             end
             ProgressMeter.next!(progress_bar; showvalues = [(:Mode, operation_mode), (:Iteration, i), (:Notes, notes)])
 
+            count += 1
         end
     catch e 
         if e isa InterruptException 
             println("Function terminated by user")
-            x_hist = x_hist[:, 1:(i+1)]
+            x_hist = x_hist[:, 1:(count)]
             return mekf_hist, satellite_truth, satellite_estimate, x_hist, ground_truth_hist, sensors_hist, estimates_hist, cov_hist, ecl_hist, noise_hist
         else
-            # println("Strange error... ", e)
           @show e     
           rethrow(e)
+          x_hist = x_hist[:, 1:(count)]
+          return mekf_hist, satellite_truth, satellite_estimate, x_hist, ground_truth_hist, sensors_hist, estimates_hist, cov_hist, ecl_hist, noise_hist
         end
     end
 
-    return mekf_hist, satellite_truth, satellite_estimate, x_hist, ground_truth_hist, sensors_hist, estimates_hist, cov_hist, ecl_hist, noise_hist
+    return mekf_hist, satellite_truth, satellite_estimate, x_hist, ground_truth_hist, sensors_hist, estimates_hist, cov_hist, ecl_hist, noise_hist, mode_hist
 end
 
-mekf_hist, satellite_truth, satellite_estimate, x_hist, ground_truth_hist, sensors_hist, estimates_hist, cov_hist, ecl_hist, noise_hist = main();
+mekf_hist, satellite_truth, satellite_estimate, x_hist, ground_truth_hist, sensors_hist, estimates_hist, cov_hist, ecl_hist, noise_hist, mode_hist = main();
 
+
+
+# FIRST organize data 
+# SECOND generate plots (easy to comment out and speed up)
 println("Generating Plots...")
 
 N = size(x_hist, 2) - 1
@@ -363,42 +372,53 @@ N = size(x_hist, 2) - 1
 report_on_magnetometer(satellite_truth, satellite_estimate, estimates_hist[1], sensors_hist[1:N], ground_truth_hist[1:N])
 report_on_detumbler(x_hist, sensors_hist[1:N])
 report_on_diodes(satellite_truth, estimates_hist[1:N])
+# report_on_mekf()
 
 ##### MAGNETOMETER CALIBRATION
-N = size(x_hist, 2) - 1
 Bᴵ = mat_from_vec([ground_truth_hist[i].Bᴵ_hist for i = 1:N])
 sᴵ = mat_from_vec([ground_truth_hist[i].sᴵ_hist for i = 1:N])
 ŝᴮ = mat_from_vec([ground_truth_hist[i].ŝᴮ_hist for i = 1:N])
+Bᴮ_truth = mat_from_vec([ground_truth_hist[i].Bᴮ_hist for i = 1:N])
 t  = [ground_truth_hist[i].t_hist - _epc for i = 1:N]
 
-Bᴮ =    mat_from_vec([sensors_hist[i].magnetometer for i = 1:N])
+Bᴮ =       mat_from_vec([sensors_hist[i].magnetometer for i = 1:N])
 currents = mat_from_vec([sensors_hist[i].diodes for i = 1:N])
 gyro =     mat_from_vec([sensors_hist[i].gyro   for i = 1:N])
 pos =      mat_from_vec([sensors_hist[i].gps    for i = 1:N])
 
 β_ests = mat_from_vec([estimates_hist[i].state[5:7] for i = 1:N])
 q_ests = mat_from_vec([estimates_hist[i].state[1:4] for i = 1:N])
+c_est = mat_from_vec([estimates_hist[i].diodes.calib_values for i = 1:N])
+α_est = mat_from_vec([rad2deg.(estimates_hist[i].diodes.azi_angles)  for i = 1:N])
+ϵ_est = mat_from_vec([rad2deg.(estimates_hist[i].diodes.elev_angles) for i = 1:N])
 
-mag_noise = mat_from_vec([noise_hist[i].magnetometer for i = 1:N])
+mag_noise   = mat_from_vec([noise_hist[i].magnetometer for i = 1:N])
 diode_noise = mat_from_vec([noise_hist[i].diodes for i = 1:N])
-gyro_noise = mat_from_vec([noise_hist[i].gyro for i = 1:N])
-gps_noise = mat_from_vec([noise_hist[i].gps for i = 1:N])
+gyro_noise  = mat_from_vec([noise_hist[i].gyro for i = 1:N])
+gps_noise   = mat_from_vec([noise_hist[i].gps for i = 1:N])
 
-c_est, α_est, ϵ_est = zeros(6, N), zeros(6, N), zeros(6, N)
 
-for i = 1:N
-    c_est[:, i] = estimates_hist[i].diodes.calib_values
-    α_est[:, i] = rad2deg.(estimates_hist[i].diodes.azi_angles)
-    ϵ_est[:, i] = rad2deg.(estimates_hist[i].diodes.elev_angles)
-end
+sᴮ_ests  = mat_from_vec([estimate_sun_vector(sensors_hist[i], estimates_hist[i]) for i = 1:N])
+sᴵ_mag = [norm(sᴵ[:, i]) for i = 1:N]; sᴵ_mag /= maximum(sᴵ_mag);
+sᴮ_mag = [norm(ŝᴮ[:, i]) for i = 1:N]
+
+# c_est, α_est, ϵ_est = zeros(6, N), zeros(6, N), zeros(6, N)
+
+# for i = 1:N
+#     c_est[:, i] = estimates_hist[i].diodes.calib_values
+#     α_est[:, i] = rad2deg.(estimates_hist[i].diodes.azi_angles)
+#     ϵ_est[:, i] = rad2deg.(estimates_hist[i].diodes.elev_angles)
+# end
+# WATCH THE NAME HERE, c is use like a billion times 
 c, ϵ, α = satellite_truth.diodes.calib_values, rad2deg.(satellite_truth.diodes.elev_angles), rad2deg.(satellite_truth.diodes.azi_angles)
 
-sᴮ_ests = zeros(3, N)
-Bᴮ_truth = zeros(3,N)
-for i = 1:N
-    Bᴮ_truth[:,i] = ground_truth_hist[i].Bᴮ_hist
-    sᴮ_ests[:, i] = estimate_sun_vector(sensors_hist[i], estimates_hist[i])
-end
+
+# sᴮ_ests = zeros(3, N)
+# Bᴮ_truth = zeros(3,N)
+# for i = 1:N
+#     Bᴮ_truth[:,i] = ground_truth_hist[i].Bᴮ_hist
+#     sᴮ_ests[:, i] = estimate_sun_vector(sensors_hist[i], estimates_hist[i])
+# end
 
 @save string(run_folder, "data.jld2")
 
@@ -417,7 +437,8 @@ a, b, c = satellite_truth.magnetometer.scale_factors
 ρ, λ, ϕ = satellite_truth.magnetometer.non_ortho_angles
 
 
-qp1 = plot(mekf_hist[1:4, 1:N]', title = "Attitude Estimate"); qp2 = plot(x_hist[7:10,:]', title = "Truth", label = false); qp3 = plot( (x_hist[7:10,2:(end)] - mekf_hist[1:4, 1:N])', ylim = (-1.1, 1.1), title = "Dif1", label = false); qp4 = plot( (x_hist[7:10,2:(end)] + mekf_hist[1:4, 1:N])', ylim = (-1.1, 1.1), title = "Dif2", label = false); 
+qp1 = plot(mekf_hist[1:4, 1:N]', title = "Attitude Estimate"); qp2 = plot(x_hist[7:10,:]', title = "Truth", label = false); 
+qp3 = plot( (x_hist[7:10,2:(end)] - mekf_hist[1:4, 1:N])', ylim = (-1.1, 1.1), title = "Dif1", label = false); qp4 = plot( (x_hist[7:10,2:(end)] + mekf_hist[1:4, 1:N])', ylim = (-1.1, 1.1), title = "Dif2", label = false); 
 display(plot(qp1, qp2, qp3, qp4, layout = (4,1)))
 
 bp1 = plot(mekf_hist[5:7, 1:N]',   title = "Bias Estimate"  ); bp2 = plot(x_hist[14:16,:]', title = "Truth"); bp3 = plot( (x_hist[14:16,2:(end)] - mekf_hist[5:7, 1:N])', title = "Dif", ylim = [-0.04, 0.04]); 
@@ -445,27 +466,73 @@ ec = plot(ϵ_cov, title = "ϵ Cov")
 totc = plot(total_cov, title = "Total")
 display(plot(cc, ac, ec, totc, layout = (4, 1), title = "Covariances")); savefig(string(run_folder, "cov.png"))
 
-
-
-sᴵ_mag = [norm(sᴵ[:, i]) for i = 1:N]; sᴵ_mag /= maximum(sᴵ_mag);
-sᴮ_mag = [norm(ŝᴮ[:, i]) for i = 1:N]
-
 a = plot(ŝᴮ', title = "Truth"); b= plot(sᴮ_ests', title = "sᴮ Est"); c = plot((ŝᴮ - sᴮ_ests)', title = "Dif"); 
 display(plot(b, a, c, layout = (3,1))); savefig(string(run_folder, "body_sun_vec.png"))
 
 a = plot(sᴵ_mag, title = "sᴵ Mag", label = "sᴵ"); b = plot(sᴮ_mag, title = "sᴮ Mag", label = "sᴮ"); c = plot(ecl_hist[1:N], title = "Eclipse", label = "Eclipse")    
 display(plot(a, b, c, layout = (3, 1))); 
 
-ŵ = gyro - β_ests
-w = x_hist[11:13,  1:N]
-a = plot(ŵ', title = "ω Est"); b = plot(w', title = "Truth", label = false); c = plot((w - ŵ)', title = "Diff", label = false); d = plot(gyro_noise', title = "Noise", label = false)
-display(plot(a, b, d, c, layout = (4,1))); savefig(string(run_folder, "gyro.png"))
+# ŵ = gyro - β_ests
+# w = x_hist[11:13,  1:N]
+# a = plot(ŵ', title = "ω Est"); b = plot(w', title = "Truth", label = false); c = plot((w - ŵ)', title = "Diff", label = false); d = plot(gyro_noise', title = "Noise", label = false)
+# display(plot(a, b, d, c, layout = (4,1))); savefig(string(run_folder, "gyro.png"))
 
-pos_hat = pos 
-pos = x_hist[1:3, 1:N]
-a = plot(pos_hat', title = "Pos Est"); b = plot(pos', title = "Truth", label = false); c = plot((pos - pos_hat)', title = "Diff", label = false); d = plot(gps_noise', title = "Noise", label = false)
-display(plot(a, b, d, c, layout = (4,1))); savefig(string(run_folder, "gps.png"))
+# pos_hat = pos 
+# pos = x_hist[1:3, 1:N]
+# a = plot(pos_hat', title = "Pos Est"); b = plot(pos', title = "Truth", label = false); c = plot((pos - pos_hat)', title = "Diff", label = false); d = plot(gps_noise', title = "Noise", label = false)
+# display(plot(a, b, d, c, layout = (4,1))); savefig(string(run_folder, "gps.png"))
 
-a = plot(Bᴮ', title = "Bᴮ Est"); b = plot(Bᴮ_truth', title = "Truth", label = false); c = plot((Bᴮ_truth - Bᴮ)', title = "Diff", label = false); d = plot(mag_noise', title = "Noise", label = false)
-display(plot(a,b, d, c, layout = (4,1))); savefig(string(run_folder, "body_mag.png"))
+# a = plot(Bᴮ', title = "Bᴮ Est"); b = plot(Bᴮ_truth', title = "Truth", label = false); c = plot((Bᴮ_truth - Bᴮ)', title = "Diff", label = false); d = plot(mag_noise', title = "Noise", label = false)
+# display(plot(a,b, d, c, layout = (4,1))); savefig(string(run_folder, "body_mag.png"))
 
+
+
+# # Sensors: Truth + Mag, Est + Mag, Noise + mag, percentage of truth : noise 
+# # Gyro 
+# ŵ = gyro - β_ests; ŵ_mag = [norm(ŵ[:, i]) for i = 1:N]
+# w = x_hist[11:13,  1:N]; w_mag = [norm(w[:, i]) for i = 1:N]
+# gyro_noise_mag = [norm(gyro_noise[:, i]) for i = 1:N]
+# gyro_error = (w - ŵ); gyro_error_mag = [norm(gyro_error[:, i]) for i = 1:N]
+# a = plot(ŵ', title = "ω Est"); a = plot!(w_mag, color = :black)
+# b = plot(w', title = "Truth", label = false); b = plot!(ŵ_mag, label = false, color = :black)
+# c = plot(gyro_noise', title = "Noise", label = false); c = plot!(gyro_noise_mag, label = false, color = :black)
+# d = plot(gyro_error', title = "Error", label = false); d = plot!(gyro_error_mag, label = false, color = :black)
+# e = plot(w_mag / gyro_noise_mag)
+# display(plot(a, b, c, d, e, layout = (5, 1)))
+
+# # GPS 
+# pos_mag = [norm(pos[:, i]) for i = 1:N]
+# pos_t = x_hist[11:13,  1:N]; pos_t_mag = [norm(pos_t[:, i]) for i = 1:N]
+# gps_noise_mag = [norm(gps_noise[:, i]) for i = 1:N]
+# pos_error = (pos_t - pos); pos_error_mag = [norm(pos_error[:, i]) for i = 1:N]
+# a = plot(pos', title = "Pos Est"); a = plot!(pos_mag, color = :black)
+# b = plot(pos_t', title = "Truth", label = false); b = plot!(pos_t_mag, label = false, color = :black)
+# c = plot(gps_noise', title = "Noise", label = false); c = plot!(gps_noise_mag, label = false, color = :black)
+# d = plot(pos_error', title = "Error", label = false); d = plot!(pos_error_mag, label = false, color = :black)
+# e = plot(pos_t_mag / gps_noise_mag)
+# display(plot(a, b, c, d, e, layout = (5, 1)))
+
+# est = pos;                  est_mag = [norm(est[:, i]) for i = 1:N]
+# tru = x_hist[11:13, 1:N];   tru_mag = [norm(tru[:, i]) for i = 1:N]
+# noise = gps_noise;          noise_mag = [norm(noise[:, i]) for i = 1:N] 
+# err = (tru - est);          error_mag = [norm(err[:, i]) for i = 1:N]
+# a = plot(est', title = "Mag Est");                  a = plot!(est_mag, color = :black)
+# b = plot(tru', title = "Truth", label = false);     b = plot!(tru_mag, color = :black, label = false)
+# c = plot(noise', title = "Noise", label = false);   c = plot!(noise_mag, color = :black, label = false)
+# d = plot(err', title = "Error", label = false);     d = plot!(error_mag, color=:black, label = false)
+# e = plot(tru_mag / noise_mag)
+# display(plot(a, b, c, d, e layout = (5, 1))
+
+
+# # Magnetometer 
+# est = Bᴮ; est_mag = [norm(est[:, i]) for i = 1:N]
+# tru = Bᴮ_truth; tru_mag = [norm(tru[:, i]) for i = 1:N]
+# # noise = 
+# err = (tru - est); error_mag = [norm(err[:, i]) for i = 1:N]
+# a = plot(est', title = "Mag Est");                  a = plot!(est_mag, color = :black)
+# b = plot(tru', title = "Truth", label = false);     b = plot!(tru_mag, color = :black, label = false)
+# d = plot(err', title = "Error", label = false);     d = plot!(error_mag, color=:black, label = false)
+# display(plot(a, b, d, layout = (3, 1)))
+
+
+# # Diodes 
