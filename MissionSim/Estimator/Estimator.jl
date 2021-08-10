@@ -12,17 +12,19 @@ using Random, Distributions
 
 # Primary Functions
 export estimate_vals
+export initialize_diodes
+export initialize_magnetometer
 export initialize
 export save_global_variables ## REMOVE
 export new_diode_calib
-export new_mekf
+export new_mekf_data
 
 export check_if_run # # # # #
 
 # Types of estimators available:
 export MAG_CALIB
 export DIODE_CALIB
-export MEKF
+export MEKF_DATA
 
 
 include("estimator_config_file.jl")
@@ -66,28 +68,18 @@ function compute_diode_albedo(albedo_matrix, cell_centers_ecef, surface_normal, 
     return diode_albedo
 end
 
-function initialize(m::MAGNETOMETER)
-    return m 
+function initialize_magnetometer()
+    return MAGNETOMETER(ones(3), zeros(3), zeros(3)) # Assume no bias, no non-orthogonality, and a unit scale factor 
 end
 
-# MOVE to CONFIG? σᶜ, μᶜ, etc...?
-function initialize(sat::SATELLITE, diode::DIODES)
-    """ SAT TURTH not EST"""
-    _num_diodes = length(sat.diodes.azi_angles)
+function initialize_diodes(_num_diodes)
+    """ Initial estimate for photodiode parameters (what they were intended to be when installed) """
     
-    # # Calib Azi Elev ∈ DIODE 
-
-    scale_factor_init_est = ones(_num_diodes) #sat.diodes.calib_values + rand(Normal(0.0, 0.3), _num_diodes)
-    azi_angles_init_est   = [0.0;      pi;    (pi/2); (-pi/2);  0.0;    pi] #.+ (pi/6) #sat.diodes.azi_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)       
-    elev_angles_init_est  = [(-pi/4); (pi/4);  0.0;    0.0;    (pi/4); (-pi/4)] #.+ (pi/6) #sat.diodes.elev_angles + rand(Normal(0.0, deg2rad(3)), _num_diodes)
-    
-    # elev_angles_init_est = [(-pi/4);  (pi/4);      0.0;      0.0; (pi/4);  (-pi/4)] 
-    # azi_angles_init_est  = [(pi/4); (5*pi/4); (3*pi/4); (7*pi/4); (pi/4); (5*pi/4)]  
-    
+    scale_factor_init_est = ones(_num_diodes) 
+    azi_angles_init_est   = [0.0;      pi;    (pi/2); (-pi/2);  0.0;    pi] 
+    elev_angles_init_est  = [(-pi/4); (pi/4);  0.0;    0.0;    (pi/4); (-pi/4)]
     
     diode = DIODES(scale_factor_init_est, azi_angles_init_est, elev_angles_init_est)
-
-    # println("Need to not add pi/4 here and in config")
 
     return diode
 end
@@ -97,11 +89,7 @@ end
 ####################################################################
 
 function estimate_vals(sat::SATELLITE, data::TRIVIAL)
-    return sat, data #, false 
+    return sat, data 
 end
-
-
-
-
 
 end

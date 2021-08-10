@@ -1,5 +1,5 @@
 # ESTIMATORS
-There are three types of estimators used in this system: one to calibrate the magnetometer, one to calibrate the photodiodes, and a standard MEKF to estimate attitude (there is an additional "trivial" controller as well that performs no estimations and simply used for convenience in coding).
+There are three types of estimators used in this system: one to calibrate the magnetometer, one to calibrate the photodiodes, and a standard MEKF to estimate attitude once everything is calibrated (there is an additional "trivial" controller as well that performs no estimations and simply used for convenience in coding).
 
 ## Magnetometer Calibration
 The purpose of the magnetometer calibration is to account for imperfections in the magnetometer that affect the measured magnetic field vector. These error sources include constant biases, scale factors, and axes that are not perfectly orthogonal.
