@@ -17,13 +17,13 @@ using LinearAlgebra, SatelliteDynamics, Distributions, EarthAlbedo
 # STATE ------------------------------------------------------------------------#
 
     # # Initial position and velocity (in terms of osculating orbital elements)
-    # orbit = "Generic"
-    # sma = _Re + 550e3 + 5000 * randn()  # Semi-major axis       (m)
-    # ecc = 0.01 + 0.001 * randn()       # Eccentricity          ()
-    # inc = 96.0 + 5.0 * randn()         # Inclination           (deg)
-    # Ω   = 90 + 75.0 + 5.0 * randn()         # RAAN                  (deg)
-    # ω   = 30.0 + 5.0 * randn()         # Argument of perigee   (deg)
-    # M   = 0.0  + 5.0 * randn()         # Mean anomaly          (deg)
+    # const orbit = "Generic"
+    # const sma = _Re + 550e3 + 5000 * randn() # Semi-major axis       (m)
+    # const ecc = 0.01 + 0.001 * randn()       # Eccentricity          ()
+    # const inc = 96.0 + 5.0 * randn()         # Inclination           (deg)
+    # const Ω   = 90 + 75.0 + 5.0 * randn()    # RAAN                  (deg)
+    # const ω   = 30.0 + 5.0 * randn()         # Argument of perigee   (deg)
+    # const M   = 0.0  + 5.0 * randn()         # Mean anomaly          (deg)
     
 
     # """   ISS   """
@@ -32,7 +32,7 @@ using LinearAlgebra, SatelliteDynamics, Distributions, EarthAlbedo
     const inc = 51.6426 + randn()
     const Ω   = 178.1369 + randn()
     const ω   = 174.7410 + randn()
-    const M   = 330.7918 + 180  + 110 #+ randn() # +94/95 is just before sun
+    const M   = 330.7918 + 110 + randn() # +94/95 is just before sun
     const sma = (_Re + 421e3) / (1 + ecc)  # Apogee = semi_major * (1 + ecc)
 
 
@@ -76,7 +76,7 @@ using LinearAlgebra, SatelliteDynamics, Distributions, EarthAlbedo
 # GENERAL ----------------------------------------------------------------------#
     const _dt = 0.2 #1.0  # (s)    
     const _run_freq = 1 / _dt
-    const _T = round(1.25 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
+    const _T = round(2.0 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
     const _epc = Epoch(2021, 9, 1, 11, 0, 0, 0.0); # Initial time for sim  ############## add in randomness to time?
     const _max_sim_length = Int(_T)
     const _ds_rate = Int(round(120/_dt))

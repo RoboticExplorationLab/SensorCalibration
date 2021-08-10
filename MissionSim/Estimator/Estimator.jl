@@ -7,7 +7,7 @@ using ..CustomStructs
 using LinearAlgebra
 using ForwardDiff
 using SatelliteDynamics, EarthAlbedo  # Used for sun position in MEKF
-using Random, Distributions
+using Random, Distributions, StaticArrays
 
 
 # Primary Functions
@@ -26,8 +26,8 @@ export MAG_CALIB
 export DIODE_CALIB
 export MEKF_DATA
 
-
-include("estimator_config_file.jl")
+# include("estimator_config_file.jl")
+const _E_am0 = 1366.9 # Irradiance of sunlight (TSI - visible & infrared), W/m^2 
 include("../rotationFunctions.jl")    # Contains general functions for working with quaternions
 include("magnetometer_calibration.jl")
 include("diode_calibration.jl")

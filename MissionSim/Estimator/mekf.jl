@@ -37,7 +37,7 @@ function estimate_vals(sat::SATELLITE, data::MEKF_DATA)
     x = data.sat_state[1:7]
     c, α, ϵ = sat.diodes.calib_values, sat.diodes.azi_angles, sat.diodes.elev_angles
     
-    new_state, new_covariance = mekf(x, c, α, ϵ, sat.covariance, data.W, data.V, #######3
+    new_state, new_covariance = mekf(x, c, α, ϵ, sat.covariance[1:6, 1:6], data.W, data.V, #######3
                                         data.inertial_vecs, data.body_vecs, data.ang_vel, 
                                         data.current_meas, data.num_diodes, data.pos, data.dt, 
                                         data.time, data.albedo)
@@ -46,8 +46,7 @@ function estimate_vals(sat::SATELLITE, data::MEKF_DATA)
     # data.covariance = new_covariance 
 
     sat.state = new_state[1:7] # Only tracking the non-calibration states
-    sat.covariance = new_covariance
-
+    sat.covariance[1:6, 1:6] = new_covariance
     return sat, data 
 end
 
@@ -66,7 +65,7 @@ function new_mekf_data(data::DIODE_CALIB)
     mekf = MEKF_DATA(data.albedo, data.sat_state[1:7], # data.covariance[1:6, 1:6], 
                         data.inertial_vecs,  data.body_vecs, data.ang_vel,
                         data.current_meas, data.pos, data.W[1:6, 1:6], data.V, 
-                        data.dt, data.time, data.num_diodes, )
+                        data.dt, data.time, data.num_diodes)
 
     # mekf = MEKF(data.albedo, data.sat_state[1:7], #.covariance, 
     #             data.inertial_vecs, data.ang_vel, data.body_vecs,
