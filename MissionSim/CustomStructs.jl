@@ -1,6 +1,8 @@
 module CustomStructs
 
-using EarthAlbedo, SatelliteDynamics
+using EarthAlbedo
+# include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo 
+using SatelliteDynamics
 using StaticArrays
 
 export MAGNETOMETER, DIODES, SATELLITE, SENSORS, ALBEDO, GROUND_TRUTH, ESTIMATES, TRIVIAL, FLAGS, NOISE
@@ -26,7 +28,7 @@ mutable struct SATELLITE
     magnetometer::MAGNETOMETER            # Mag calibration values      |   [3, 3, 3, 3 x number of diodes]
     diodes::DIODES                        # Diode calibration values 
     state#::Array{Float64, 1}               # Satellite State             | [q⃗ q₀ β⃗]
-    covariance::Array{<:Real, 2}
+    covariance #::Array{<:Real, 2}
 end
 Base.deepcopy(s::SATELLITE) = SATELLITE(deepcopy(s.J), deepcopy(s.magnetometer), deepcopy(s.diodes), deepcopy(s.state), deepcopy(s.covariance))
 
@@ -46,7 +48,7 @@ struct NOISE
 end
     
 struct ALBEDO
-    refl::refl_struct
+    refl#::refl_struct
     cell_centers_ecef::Array{<:Real, 3}
 end
 

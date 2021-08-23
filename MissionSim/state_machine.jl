@@ -3,32 +3,33 @@ final_count = 0
 temp_count = 0
 
 
+@info "Using ecl"
 function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, current_data, t, satellite_estimate)
 
 
+    # if flags.magnetometer_calibrated
+    #     return finished, TRIVIAL(1.0), TRIVIAL(1.0), flags
+    # end
     ##### EARLY TERMINATION CONDITIONS ########
     if flags.diodes_calibrated && flags.magnetometer_calibrated
         global final_count += 1
-        if final_count > 3000
+        if final_count > 1000
             return finished, TRIVIAL(1.0), TRIVIAL(1.0), flags
         end
     end
     ###########################################
+    in_eclipse = norm(sens.diodes ./ satellite_estimate.diodes.calib_values) < 0.8
 
     # Split sensor measurements
     ŝᴵ = sun_position(t) - sens.gps     # Estimated sun vector 
     B̂ᴵ = IGRF13(sens.gps, t)            # Estimated magnetic field vector
-    𝐬̂ᴮ = estimate_sun_vector(sens, satellite_estimate)
-    Bᴮ = sens.magnetometer      # SHOULD BE A tilde
+    Bᴮ = sens.magnetometer  
+    
+    𝐬̂ᴮ = in_eclipse ? SVector(0.0, 0.0, 0.0) : estimate_sun_vector(sens, satellite_estimate)
+    ω = flags.diodes_calibrated ? (copy(sens.gyro) - satellite_estimate.state[5:7]) : copy(sens.gyro)
 
     if flags.magnetometer_calibrated
         Bᴮ = correct_mag_field(satellite_estimate, Bᴮ)  
-    end
-
-    if flags.diodes_calibrated
-        ω = copy(sens.gyro) - satellite_estimate.state[5:7]
-    else
-        ω = copy(sens.gyro)
     end
 
 
@@ -37,11 +38,7 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
     ###########################################
 
     if flags.detumbling 
-        if flags.diodes_calibrated  # subtract out the gyro bias 
-            flags.detumbling = !check_if_finished(ω, deg2rad(10))  
-        else
-            flags.detumbling = !check_if_finished(ω, deg2rad(25)) 
-        end
+        flags.detumbling = flags.diodes_calibrated ? (!check_if_finished(ω, deg2rad(10))) : (!check_if_finished(ω, deg2rad(25)))
         
         if flags.detumbling  # Still detumbling, continue
             mode, cont, est = detumble,  DETUMBLER(sens.gyro, Bᴮ, system._dt), TRIVIAL(0.0)
@@ -55,8 +52,8 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
                 Bᴮ = correct_mag_field(satellite_estimate, sens.magnetometer)  # If it is now calibrated, correct Bᴮ 
             end       
         else  # Calibrating DIODES   
-            if sum(abs.(sens.diodes)) > eclipse_threshold # If still in sun
-                if check_if_finished(satellite_estimate.covariance[7:end, 7:end], 0.008) #0.0065) 
+            if !in_eclipse # norm(sens.diodes) > eclipse_threshold # If still in sun
+                if check_if_finished(satellite_estimate.covariance[7:end, 7:end], 0.004) #0.11) # 0.007) #for non-sqrt
                     flags.calibrating, flags.diodes_calibrated = false, true
                 end
             else
@@ -108,7 +105,7 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
         est = MAG_CALIB(Bᴮ, B̂ᴵ)
         flags.calibrating = true
 
-    elseif (norm(𝐬̂ᴮ) > 0.9) # in sun -> Make consistent across everything!
+    elseif !in_eclipse #norm(sens.diodes) > eclipse_threshold # (norm(𝐬̂ᴮ) > 0.9) # in sun -> Make consistent across everything!
 
         flags.in_sun = true 
         if !flags.diodes_calibrated
@@ -162,7 +159,7 @@ function estimate_sun_vector(sens::SENSORS, sat_est::SATELLITE)
     """ Estimates a (unit) sun vector using the diode measurements 
             (Note that the equation is strange because a 45° rotation @ ŷ was used to avoid boundary problems with the elevation angles) """
 
-    if norm(sens.diodes) > eclipse_threshold  # If not eclipsed
+    if true # norm(sens.diodes) > eclipse_threshold  # If not eclipsed
         x₁ = (sens.diodes[1]/sat_est.diodes.calib_values[1])
         x₂ = (sens.diodes[2]/sat_est.diodes.calib_values[2])
         y₁ = (sens.diodes[3]/sat_est.diodes.calib_values[3])
@@ -266,8 +263,3 @@ function check_if_finished(sat_est::SATELLITE)
         return true
     end
 end
-
-# # For photodiodes ( combine with detumbler)
-# function check_if_finished(data::DIODE_CALIB, sat_est::SATELLITE)
-#     return (norm(sat_est.covariance) < 0.0065) #7)
-# end

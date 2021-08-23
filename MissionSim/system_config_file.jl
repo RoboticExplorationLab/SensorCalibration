@@ -1,4 +1,6 @@
-using LinearAlgebra, SatelliteDynamics, Distributions, EarthAlbedo
+using LinearAlgebra, SatelliteDynamics, Distributions
+# using EarthAlbedo  # Included in main
+# include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo
 
 # CONSTANTS --------------------------------------------------------------------#
     const _Re = 6378136.3                 # Radius of the earth (m)) 
@@ -28,11 +30,11 @@ using LinearAlgebra, SatelliteDynamics, Distributions, EarthAlbedo
 
     # """   ISS   """
     const orbit = "ISS"
-    const ecc = 0.0001717 + 0.000001 * randn()
+    const ecc = 0.0001717 + 0.00001 * randn()
     const inc = 51.6426 + randn()
     const Ω   = 178.1369 + randn()
     const ω   = 174.7410 + randn()
-    const M   = 330.7918 + 110 + randn() # +94/95 is just before sun
+    const M   = 330.7918 + 110 + randn() # +94/95 is just before sun, -40 is just before eclipse
     const sma = (_Re + 421e3) / (1 + ecc)  # Apogee = semi_major * (1 + ecc)
 
 
@@ -76,13 +78,13 @@ using LinearAlgebra, SatelliteDynamics, Distributions, EarthAlbedo
 # GENERAL ----------------------------------------------------------------------#
     const _dt = 0.2 #1.0  # (s)    
     const _run_freq = 1 / _dt
-    const _T = round(2.0 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
+    const _T = round(1.5 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
     const _epc = Epoch(2021, 9, 1, 11, 0, 0, 0.0); # Initial time for sim  ############## add in randomness to time?
     const _max_sim_length = Int(_T)
     const _ds_rate = Int(round(120/_dt))
 
     const SYSTEM = (_dt = _dt, _T = _T, _epc = _epc, _max_sim_length = _max_sim_length, _num_diodes = _num_diodes)
     
-    const eclipse_threshold = 0.02
+    # const eclipse_threshold = 0.2
 
 @info "Generating $orbit orbit and running at $_run_freq Hz"

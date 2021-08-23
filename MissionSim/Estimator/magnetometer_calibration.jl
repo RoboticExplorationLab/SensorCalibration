@@ -2,7 +2,7 @@
 #               MAGNETOMETER CALIBRATION                           #
 ####################################################################
 
-using JLD2
+using JLD2, Infiltrator
 function save_global_variables(sat_truth, sat_init_est)
     """
         Temporary function used to save orbit data to test various downsampling rates
@@ -11,13 +11,18 @@ function save_global_variables(sat_truth, sat_init_est)
     println("Saved Orbit data!")
 end
 
-mag_field_meas_hist = 0 
-mag_field_pred_hist = 0
-A = 0 
+# Int(round(2 * orbit_period(oe0[1]))/_dt)
+# @info "Relies on there being no change to dt and stuff (mag cal)"  # Use an init() function? Better if no globals...
+@info "Speed up magnetometer calibration"
+max_idx = Int(round(55780/600))
+cur_idx = 0
+mag_field_meas_hist = @MArray zeros(max_idx*3)
+mag_field_pred_hist = @MArray zeros(max_idx*3)
+A = @MArray zeros(3*max_idx, 9)
 has_run = false
 
 struct MAG_CALIB 
-    mag_field_meas 
+    mag_field_meas
     mag_field_pred
 end
 
@@ -42,17 +47,28 @@ function estimate_vals(sat::SATELLITE, data::MAG_CALIB, estimate_flag::Bool)
             - data: Unaltered data struct                                       |  MAG_CALIB
     """  
 
-    if isempty(size(mag_field_meas_hist))  # Initialize   
-        global mag_field_meas_hist = data.mag_field_meas[:]    
-        global mag_field_pred_hist = data.mag_field_pred[:]   
-        global A = [(data.mag_field_pred[1]*I(3))       (data.mag_field_pred[2]*I(3))[:, 2:3]       (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
-    else 
-        global mag_field_meas_hist = [mag_field_meas_hist[:]; data.mag_field_meas[:]] 
-        global mag_field_pred_hist = [mag_field_pred_hist[:]; data.mag_field_pred[:]] 
-        new_row =  [(data.mag_field_pred[1]*I(3))       (data.mag_field_pred[2]*I(3))[:, 2:3]       (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
+    
+    # if isempty(size(mag_field_meas_hist))  # Initialize   
+    #     global mag_field_meas_hist = data.mag_field_meas[:]    
+    #     global mag_field_pred_hist = data.mag_field_pred[:]   
+    #     global A = [(data.mag_field_pred[1]*I(3))       (data.mag_field_pred[2]*I(3))[:, 2:3]       (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
+    # else 
+    #     global mag_field_meas_hist = [mag_field_meas_hist[:]; data.mag_field_meas[:]] 
+    #     global mag_field_pred_hist = [mag_field_pred_hist[:]; data.mag_field_pred[:]] 
+    #     new_row =  [(data.mag_field_pred[1]*I(3))       (data.mag_field_pred[2]*I(3))[:, 2:3]       (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
 
-        global A = [A; new_row]
-    end
+    #     global A = [A; new_row]
+    # end
+    
+
+    idx = cur_idx % max_idx # what about when it == 0? it should be max_idx instead yeah?  (cur_idx % max_idx) + 1, cur_idx\_0  = 0 != 1
+    i₀ = (3*idx + 1)
+    i₁ = (3*idx + 3)
+    global mag_field_meas_hist[i₀:i₁] = data.mag_field_meas
+    global mag_field_pred_hist[i₀:i₁] = data.mag_field_pred
+    global A[i₀:i₁, :] .= [(data.mag_field_pred[1]*I(3))    (data.mag_field_pred[2]*I(3))[:, 2:3]    (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
+
+    global cur_idx += 1
 
     if estimate_flag # Only estimates once enough data has been gathered
         return run_gn(sat, data)

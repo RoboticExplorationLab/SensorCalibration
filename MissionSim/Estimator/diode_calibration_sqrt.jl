@@ -1,7 +1,7 @@
 ####################################################################
 #               DIODE CALIBRATION + MEKF                           #
 ####################################################################
-using Infiltrator, BenchmarkTools
+using Infiltrator, BenchmarkTools, Test
 
 mutable struct DIODE_CALIB 
     albedo::ALBEDO  #  Albedo Struct
@@ -33,10 +33,20 @@ function estimate_vals(sat::SATELLITE, data::DIODE_CALIB)
             - data: Updated struct containing necessary MEKF information        |  -----
     """  
     data.time += data.dt   
-    new_state, new_covariance = mekf(data.sat_state, sat.covariance, data.W, data.V,   # CHANGED data. -> sat.
+    new_state, new_covariance = mekf_sqrt(data.sat_state, sat.covariance, data.W, data.V,   # CHANGED data. -> sat.
                                         data.inertial_vecs, data.body_vecs, data.ang_vel, 
                                         data.current_meas, data.num_diodes, data.pos, data.dt, 
                                         data.time, data.albedo)
+
+    # P = sat.covariance' * sat.covariance
+    # state_alt, cov_alt = mekf(data.sat_state, P, data.W, data.V,   # CHANGED data. -> sat.
+    #                                     data.inertial_vecs, data.body_vecs, data.ang_vel, 
+    #                                     data.current_meas, data.num_diodes, data.pos, data.dt, 
+    #                                     data.time, data.albedo)
+
+    # if !(new_state ≈ state_alt) || !((new_covariance' * new_covariance) ≈ cov_alt)
+    #     @infiltrate 
+    # end
 
     # @btime mekf($data.sat_state, $sat.covariance, $data.W, $data.V,   
     #                 $data.inertial_vecs, $data.body_vecs, $data.ang_vel, 
@@ -235,11 +245,12 @@ function new_diode_calib(albedo, sens::SENSORS, system, q, sat)
     if isnan(sat.covariance[1,1]) # Setting up covariance from scratch
         p = [σ_q * ones(3); σ_β * ones(3); σ_c * ones(data.num_diodes); σ_α*ones(data.num_diodes); σ_ϵ*ones(data.num_diodes)].^2
         P₀ = diagm(p)
+        P₀ = chol(P₀)
     else    # Setting up covariance after an eclipse
         p = [σ_q * ones(3); σ_β * ones(3)].^2   # Reset Attitude and Bias covariance
         P_new = diagm(p)
-        P₀ = sat.covariance 
-        P₀[1:6, 1:6] = P_new                    # Keep calibration covariances
+        P₀ = sat.covariance # Should already be cholesky-ified
+        P₀[1:6, 1:6] = chol(P_new)                    # Keep calibration covariances
     end
 
 
@@ -264,95 +275,11 @@ function new_diode_calib(albedo, sens::SENSORS, system, q, sat)
     V = Diagonal([σ_magVec * ones(3); σ_curr * ones(data.num_diodes)])
     
     data.sat_state = x₀
-    sat.covariance = P₀
+    sat.covariance = P₀    #chol(P₀) #Matrix(chol(P₀))
     data.W = W 
     data.V = V
 
     return data
-end
-
-function mekf(x, P, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time, alb::ALBEDO)
-    """
-        Runs a single step of a multiplicative extended Kalman filter
-
-        Arguments:
-            - x: Current state + calibration estimates [(q⃗, q₀) β C α ϵ]  |  [7 + 3i,]
-            - P: Current covariance matrix for the state                  |  [6 + 3i  x  6 + 3i]
-            - W: Process noise matrix                                     |  [6 + 3i  x  6 + 3i]
-            - V: Measurement noise matrix                                 |  [3 + i,]
-            - rᴵ: Reference vectors in inertial frame                     |  [2 x 3]
-            - rᴮ: Reference vectors in body frame                         |  [2 x 3]
-            - w: Angular velocity                                         |  [3,]
-            - y: Current measurements                                     |  [i,]
-            - _num_diodes: Number of photodiodes (i)                      |  Int 
-            - pos: Current satellite position estimate                    |  [3,]
-            - dt: Simulation time step                                    |  Scalar 
-            - time: Current time (as an epoch)                            |  Epoch 
-            - alb: ALBEDO struct containing refl and cell centers         |  ALBEDO
-
-        Returns:
-            - x_next: Estimate of next state                              |  [7 + 3i,]
-            - P_next: Covariance of next state                            |  [6 +3i  x  6 + 3i]
-    """     
-    sᴵ = @view rᴵ[1,:];  𝐬ᴵ = sᴵ / norm(sᴵ)
-    Bᴵ = @view rᴵ[2,:];  𝐁ᴵ = Bᴵ / norm(Bᴵ)                    
-    Bᴮ = @view rᴮ[2,:];  𝐁ᴮ = Bᴮ / norm(Bᴮ)
-
-    # Prediction
-    x_p, A = prediction(x, w, dt, _num_diodes); # State prediction
-
-    # ##### REMOVE #####
-    # x_p_alt, A_alt = py"prediction"(x, w, dt, _num_diodes)
-    # if (norm(x_p - x_p_alt) > 0.01) || (norm(A - A_alt) > 0.01)
-    #     @infiltrate 
-    # end
-    # ##################
-
-    P_p = A*P*A' + W;                           # Covariance prediction 
-
-    # Measurement
-    yp_mag, C_mag = mag_measurement(x_p, 𝐁ᴵ, _num_diodes)
-
-    # ##### REMOVE ##### 
-    # yp_mag_alt, C_mag_alt = py"mag_measurement"(x_p, 𝐁ᴵ, _num_diodes)
-    # if (norm(yp_mag - yp_mag_alt) > 0.01) || (norm(C_mag - C_mag_alt) > 0.01)
-    #     @infiltrate 
-    # end
-    # ##################
-
-    z_mag = 𝐁ᴮ - yp_mag 
-    yp_cur, C_cur = current_measurement(x_p, 𝐬ᴵ,_num_diodes, pos, time, alb) 
-    z_cur = y - yp_cur 
-
-    C = [C_mag; C_cur]
-    z = [z_mag[:]; z_cur[:]]
-
-    # Innovation   
-    Vk = Diagonal(V) 
-    S = C*P_p*C' + Vk; 
-
-    # Kalman Gain
-    L = P_p * C' * S^(-1); 
-
-    # Update
-    dx = L*z;          
-    dϕ   =  @view dx[1:3]; 
-    drest = @view dx[4:end]
-
-    θ = (norm(dϕ));
-    rTemp = dϕ / θ; 
-    
-    dq = [rTemp*sin(θ/2); cos(θ/2)];
-
-    x_next = deepcopy(x)
-    x_next[1:4] = qmult(view(x_p, 1:4), dq); 
-    x_next[5:end] = view(x_p, 5:length(x_p)) + drest;
-    
-    T = (I - L*C) 
-    P_next = T * P_p * T' + L*Vk*L';  
-    # P_next = (I(size(P,1)) - L*C) * P_p * (I(size(P,1)) - L*C)' + L*Vk*L';  
-
-    return x_next, P_next
 end
 
 function mag_measurement(x, 𝐁ᴵ, i)
@@ -413,9 +340,9 @@ function current_measurement(x, 𝐬ᴵ, i, pos, time, alb::ALBEDO)
     sᴮ = ᴮQᴵ * 𝐬ᴵ
 
     šᴮ= hat(sᴮ);  # Skew-symmetric form
-    n   = [ cos.(ϵ).*cos.(α)    cos.(ϵ).*sin.(α)      sin.(ϵ)];  # [i x 3]
-    ndα = [(-cos.(ϵ).*sin.(α))  (cos.(ϵ).*cos.(α))    zeros(size(α))];
-    ndϵ = [(-sin.(ϵ).*cos.(α))  ((-sin.(ϵ).*sin.(α))) cos.(ϵ)]; # (With negative middle term, differing from the paper)
+    n = [cos.(ϵ).*cos.(α) cos.(ϵ).*sin.(α) sin.(ϵ)];  # [i x 3]
+    ndα = [(-cos.(ϵ).*sin.(α)) (cos.(ϵ).*cos.(α)) zeros(size(α))];
+    ndϵ = [(-sin.(ϵ).*cos.(α)) ((-sin.(ϵ).*sin.(α))) cos.(ϵ)]; # (With negative middle term, differing from the paper)
     
     ∂θ = (c .* n) * šᴮ;     # [i x 3]
     ∂β = zeros(i, 3);       # [i x 3]  
@@ -449,6 +376,7 @@ function current_measurement(x, 𝐬ᴵ, i, pos, time, alb::ALBEDO)
     return y, H
 end
 
+# Make a "Rodrigues" helper function in the rotationFunctions.jl script?
 function prediction(x, w, dt, i)
     """
         Predicts the next state and covariance using current state, angular velocity, and time step
@@ -504,83 +432,35 @@ end
 
 
 
-##### TESTING
 
-function mekf_iterative(x, P, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time, alb::ALBEDO)
-    """
-        Runs a single step of a multiplicative extended Kalman filter
 
-        Arguments:
-            - x: Current state + calibration estimates [(q⃗, q₀) β C α ϵ]  |  [7 + 3i,]
-            - P: Current covariance matrix for the state                  |  [6 + 3i  x  6 + 3i]
-            - W: Process noise matrix                                     |  [6 + 3i  x  6 + 3i]
-            - V: Measurement noise matrix                                 |  [3 + i,]
-            - rᴵ: Reference vectors in inertial frame                     |  [2 x 3]
-            - rᴮ: Reference vectors in body frame                         |  [2 x 3]
-            - w: Angular velocity                                         |  [3,]
-            - y: Current measurements                                     |  [i,]
-            - _num_diodes: Number of photodiodes (i)                      |  Int 
-            - pos: Current satellite position estimate                    |  [3,]
-            - dt: Simulation time step                                    |  Scalar 
-            - time: Current time (as an epoch)                            |  Epoch 
-            - alb: ALBEDO struct containing refl and cell centers         |  ALBEDO
-
-        Returns:
-            - x_next: Estimate of next state                              |  [7 + 3i,]
-            - P_next: Covariance of next state                            |  [6 +3i  x  6 + 3i]
-    """     
+@info "Running sqrt version, which affects new diodes and mekf_sqrt"
+@info "Break down large functions into cleaner subfunctions" # If the same thing is done in multiple locations accross different functions, make a helper function
+function mekf_sqrt(x, Pchol, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time, alb::ALBEDO) 
     sᴵ = @view rᴵ[1,:];  𝐬ᴵ = sᴵ / norm(sᴵ)
-    Bᴵ = @view rᴵ[2,:];  𝐁ᴵ = Bᴵ / norm(Bᴵ)
-    𝐬ᴮ = @view rᴮ[1,:];  𝐬ᴮ = 𝐬ᴮ / norm(𝐬ᴮ)                    
+    Bᴵ = @view rᴵ[2,:];  𝐁ᴵ = Bᴵ / norm(Bᴵ)                
     Bᴮ = @view rᴮ[2,:];  𝐁ᴮ = Bᴮ / norm(Bᴮ)
 
     # Prediction
     x_p, A = prediction(x, w, dt, _num_diodes); # State prediction
-    P_p = A*P*A' + W;                           # Covariance prediction 
+    Pchol_p = qrᵣ([Pchol * A'; chol(Matrix(W))])  # Cholesky factor
 
     # Measurement
     yp_mag, C_mag = mag_measurement(x_p, 𝐁ᴵ, _num_diodes)
+    z_mag = 𝐁ᴮ - yp_mag 
     yp_cur, C_cur = current_measurement(x_p, 𝐬ᴵ,_num_diodes, pos, time, alb) 
+    z_cur = y - yp_cur 
+
     C = [C_mag; C_cur]
-    yyp = [yp_mag[:]; yp_cur[:]]
-    yy = [𝐁ᴮ[:]; y[:]]
-    Vk = Diagonal(V) 
+    z = [z_mag[:]; z_cur[:]]
 
-    x_p_og = copy(x_p)
-    z_hat = yyp
-
-    for iter = 1:3 
-        yp_mag, C_mag = mag_measurement(x_p, 𝐁ᴵ, _num_diodes)
-        yp_cur, C_cur = current_measurement(x_p, 𝐬ᴵ,_num_diodes, pos, time, alb) 
-        C = [C_mag; C_cur]
-
-        S = C*P_p*C' + Vk # P\_yy
-        L = P_p * C' * S^(-1); # K
-        dx = L*(yy - yyp);          
-        dϕ = dx[1:3]; 
-        drest = dx[4:end]
-
-        θ = (norm(dϕ));
-        rTemp = dϕ / θ; 
-    
-        dq = [rTemp*sin(θ/2); cos(θ/2)];
-
-        x_next = deepcopy(x)
-        x_next[1:4] = qmult(x_p_og[1:4], dq); 
-        x_next[5:end] = x_p_og[5:end] + drest;
-        x_p = x_next
-    end
-    # Innovation   
-    S = C*P_p*C' + Vk;  # P\_yu
-    # Kalman Gain
-    L = P_p * C' * S^(-1); 
-    z = yy - yyp
-
+    Pyy_chol = qrᵣ([Pchol_p * C'; chol(Matrix(V))])  
+    L = ((Pchol_p' * Pchol_p * C') / Pyy_chol) / (Pyy_chol')
 
     # Update
     dx = L*z;          
-    dϕ = dx[1:3]; 
-    drest = dx[4:end]
+    dϕ   =  @view dx[1:3]; 
+    drest = @view dx[4:end]
 
     θ = (norm(dϕ));
     rTemp = dϕ / θ; 
@@ -588,99 +468,23 @@ function mekf_iterative(x, P, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time
     dq = [rTemp*sin(θ/2); cos(θ/2)];
 
     x_next = deepcopy(x)
-    x_next[1:4] = qmult(x_p[1:4], dq); 
-    x_next[5:end] = x_p[5:end] + drest;
-    
-    P_next = (I(size(P,1)) - L*C) * P_p * (I(size(P,1)) - L*C)' + L*Vk*L';  
+    x_next[1:4] = qmult(view(x_p, 1:4), dq); 
+    x_next[5:end] = view(x_p, 5:length(x_p)) + drest;
 
-    return x_next, P_next
+    Pchol_next = qrᵣ([Pchol_p*(I-L*C)'; chol(Matrix(V))*L'] )
+
+    return x_next, Pchol_next
 end
 
-# May need to be adapted for the multiplicative portion
-function mekf_sequential(x, P, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time, alb::ALBEDO)
-    """
-        Runs a single step of a multiplicative extended Kalman filter
 
-        Arguments:
-            - x: Current state + calibration estimates [(q⃗, q₀) β C α ϵ]  |  [7 + 3i,]
-            - P: Current covariance matrix for the state                  |  [6 + 3i  x  6 + 3i]
-            - W: Process noise matrix                                     |  [6 + 3i  x  6 + 3i]
-            - V: Measurement noise matrix                                 |  [3 + i,]
-            - rᴵ: Reference vectors in inertial frame                     |  [2 x 3]
-            - rᴮ: Reference vectors in body frame                         |  [2 x 3]
-            - w: Angular velocity                                         |  [3,]
-            - y: Current measurements                                     |  [i,]
-            - _num_diodes: Number of photodiodes (i)                      |  Int 
-            - pos: Current satellite position estimate                    |  [3,]
-            - dt: Simulation time step                                    |  Scalar 
-            - time: Current time (as an epoch)                            |  Epoch 
-            - alb: ALBEDO struct containing refl and cell centers         |  ALBEDO
+# Helper functions 
+function chol(M)
+    # return cholesky(Symmetric(M)).U 
+    return cholesky(Hermitian(M)).U
+end
 
-        Returns:
-            - x_next: Estimate of next state                              |  [7 + 3i,]
-            - P_next: Covariance of next state                            |  [6 +3i  x  6 + 3i]
-    """     
-    sᴵ = @view rᴵ[1,:];  𝐬ᴵ = sᴵ / norm(sᴵ)
-    Bᴵ = @view rᴵ[2,:];  𝐁ᴵ = Bᴵ / norm(Bᴵ)
-    𝐬ᴮ = @view rᴮ[1,:];  𝐬ᴮ = 𝐬ᴮ / norm(𝐬ᴮ)                    
-    Bᴮ = @view rᴮ[2,:];  𝐁ᴮ = Bᴮ / norm(Bᴮ)
-
-    # Prediction
-    x̂ₖ⁻, A = prediction(x, w, dt, _num_diodes); # State prediction
-    Pₖ⁻ = A*P*A' + W;                           # Covariance prediction 
-
-    
-    # Set 1 - Magnetometer
-        # Measurement
-        zₐ = 𝐁ᴮ
-        ẑₐ, Hₐ = mag_measurement(x̂ₖ⁻, 𝐁ᴵ, _num_diodes)
-  
-        # Innovation   
-        Rₐ = @view V[1:3, 1:3] 
-        S = Hₐ*Pₖ⁻*Hₐ' + Rₐ; 
-
-        Kₐ = Pₖ⁻ * Hₐ' * S^(-1);  # Kalman Gain
-
-        # Update
-        dx = Kₐ*(zₐ - ẑₐ);    
-
-        dϕ = dx[1:3]; 
-        drest = dx[4:end]
-
-        θ = (norm(dϕ));
-        rTemp = dϕ / θ; 
-        dq = [rTemp*sin(θ/2); cos(θ/2)];
-
-        x̂ₖᵃ = deepcopy(x)
-        x̂ₖᵃ[1:4] = qmult(x̂ₖ⁻[1:4], dq); 
-        x̂ₖᵃ[5:end] = x̂ₖ⁻[5:end] + drest;
-        
-        Iₚ = I(size(P,1))
-        Pₖᵃ = (Iₚ - Kₐ*Hₐ) * Pₖ⁻ * (Iₚ - Kₐ*Hₐ)' + Kₐ*Rₐ*Kₐ';  
-
-    # Set 2 - Diodes
-        zᵦ = y
-        ẑᵦ, Hᵦ = current_measurement(x̂ₖᵃ, 𝐬ᴵ,_num_diodes, pos, time, alb) 
-        Rᵦ = @view V[4:end, 4:end] 
-        S = Hᵦ * Pₖᵃ * Hᵦ' + Rᵦ 
-        Kᵦ = Pₖᵃ * Hᵦ' * S^(-1)
-
-        # Update
-        dx = Kᵦ*(zᵦ - ẑᵦ);          
-        dϕ = dx[1:3]; 
-        drest = dx[4:end]
-
-        θ = (norm(dϕ));
-        rTemp = dϕ / θ; 
-        dq = [rTemp*sin(θ/2); cos(θ/2)];
-
-        x_next = deepcopy(x)
-        x_next[1:4] = qmult(x̂ₖ⁻[1:4], dq); 
-        x_next[5:end] = x̂ₖ⁻[5:end] + drest;
-        
-        P_next = (Iₚ - Kᵦ*Hᵦ) * Pₖᵃ * (Iₚ - Kᵦ*Hᵦ)' + Kᵦ*Rᵦ*Kᵦ'; 
-
-    return x_next, P_next
+function qrᵣ(M)
+    return qr(M).R 
 end
 
 __init_diode_cal__()

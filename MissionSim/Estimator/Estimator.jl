@@ -6,8 +6,10 @@ using ..CustomStructs
 
 using LinearAlgebra
 using ForwardDiff
-using SatelliteDynamics, EarthAlbedo  # Used for sun position in MEKF
-using Random, Distributions, StaticArrays
+using SatelliteDynamics
+using EarthAlbedo
+# include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo 
+using Random, Distributions, StaticArrays, PyCall
 
 
 # Primary Functions
@@ -30,8 +32,12 @@ export MEKF_DATA
 const _E_am0 = 1366.9 # Irradiance of sunlight (TSI - visible & infrared), W/m^2 
 include("../rotationFunctions.jl")    # Contains general functions for working with quaternions
 include("magnetometer_calibration.jl")
-include("diode_calibration.jl")
-include("mekf.jl")
+# include("diode_calibration.jl"); @info "Using standard MEKF for diode cal"
+include("diode_calibration_sqrt.jl"); @info "Using SQRT KF"
+
+# include("mekf.jl"); @info "Using Standard MEKF"
+# include("mekf_with_consideration.jl"); @info "Using Consider MEKF, no noise!"
+include("mekf_sqrt.jl"); @info "Using SQRT MEKF"
 
 function compute_diode_albedo(albedo_matrix, cell_centers_ecef, surface_normal, sat_pos)
     """ 
@@ -46,20 +52,18 @@ function compute_diode_albedo(albedo_matrix, cell_centers_ecef, surface_normal, 
         Returns:
         - diode_albedo: Total effect of albedo on specified photodiode              | Scalar
     """    
-    cell_albedos = zeros(size(albedo_matrix))
-
-    rows, cols = size(albedo_matrix)
     diode_albedo = 0.0
-    for r = 1:1:rows
-        for c = 1:1:cols
+    r_g = zeros(Float64, 3)
+    for r = 1:1:size(albedo_matrix, 1)
+        for c = 1:1:size(albedo_matrix, 2)
             if albedo_matrix[r,c] != 0
-                r_g = cell_centers_ecef[r,c,:] - sat_pos # Distance from satellite to cell center
-                r_g = r_g / norm(r_g)  # Make unit
+                r_g .= view(cell_centers_ecef, r, c, :) .- sat_pos
+                r_g .= r_g ./ norm(r_g)  # Make unit
 
-                cell_albedo = (albedo_matrix[r,c] * (surface_normal * r_g))[1]
+                cell_albedo = (albedo_matrix[r,c] * dot(surface_normal, r_g))
 
                 if cell_albedo > 0.0    # Can't be negative
-                    diode_albedo = diode_albedo + cell_albedo 
+                    diode_albedo += cell_albedo 
                 end
             end
         end

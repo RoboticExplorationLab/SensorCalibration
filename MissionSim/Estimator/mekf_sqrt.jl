@@ -37,7 +37,7 @@ function estimate_vals(sat::SATELLITE, data::MEKF_DATA)
     x = data.sat_state[1:7]
     c, α, ϵ = sat.diodes.calib_values, sat.diodes.azi_angles, sat.diodes.elev_angles
     
-    new_state, new_covariance = mekf(x, c, α, ϵ, sat.covariance[1:6, 1:6], data.W, data.V,
+    new_state, new_covariance = mekf_sqrt(x, c, α, ϵ, sat.covariance[1:6, 1:6], data.W, data.V,
                                         data.inertial_vecs, data.body_vecs, data.ang_vel, 
                                         data.current_meas, data.num_diodes, data.pos, data.dt, 
                                         data.time, data.albedo)
@@ -137,7 +137,7 @@ function new_mekf_data(alb::ALBEDO, sens::SENSORS, system, q, sat)
     
     data.sat_state = x₀
     # sat.covariance = P₀   #### Should this be sat.covariance[1:6, 1:6] = P₀?
-    sat.covariance[1:6, 1:6] = P₀
+    sat.covariance[1:6, 1:6] = chol(P₀)
     data.W = W[1:6, 1:6] # W
     data.V = V
             
@@ -170,7 +170,10 @@ function mekf(x, c, α, ϵ, P, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, tim
         Returns:
             - x_next: Estimate of next state                              |  [7 + 3i,]
             - P_next: Covariance of next state                            |  [6 +3i  x  6 + 3i]
-    """          
+    """      
+
+
+    
     sᴵ = @view rᴵ[1,:];  𝐬ᴵ = sᴵ / norm(sᴵ)
     Bᴵ = @view rᴵ[2,:];  𝐁ᴵ = Bᴵ / norm(Bᴵ)
     𝐬ᴮ = @view rᴮ[1,:];  𝐬ᴮ = 𝐬ᴮ / norm(𝐬ᴮ)                    
@@ -178,6 +181,8 @@ function mekf(x, c, α, ϵ, P, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, tim
 
     # Predict x, P
     x_p, A = prediction(x, w, dt); # State prediction
+
+
     P_p = A*P*A' + W; # Covariance prediction 
 
     # Measurement
@@ -231,6 +236,7 @@ function mag_measurement(x, 𝐁ᴵ)
             - H: Jacobian of y with respect to x                               |  [3 x 6 + 3i]
                         dy/dx = [dy/dϕ; dy/dβ; ...]                             
     """
+
     x = x[:]
     q = x[1:4]
     β = x[5:7]
@@ -344,4 +350,54 @@ function prediction(x, w, dt)
     xn = [qp; β]  # x at next step
 
     return xn, A
+end
+
+
+function mekf_sqrt(x, c, α, ϵ, Pchol, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time, alb::ALBEDO) 
+    sᴵ = @view rᴵ[1,:];  𝐬ᴵ = sᴵ / norm(sᴵ)
+    Bᴵ = @view rᴵ[2,:];  𝐁ᴵ = Bᴵ / norm(Bᴵ)                
+    Bᴮ = @view rᴮ[2,:];  𝐁ᴮ = Bᴮ / norm(Bᴮ)
+
+    # Prediction
+    x_p, A = prediction(x, w, dt) # State prediction
+    Pchol_p = qrᵣ([Pchol * A'; chol(Matrix(W))])  # Cholesky factors
+
+
+    # Measurement
+    yp_mag, C_mag = mag_measurement(x_p, 𝐁ᴵ)
+    z_mag = 𝐁ᴮ - yp_mag 
+    yp_cur, C_cur = current_measurement(x_p, c, α, ϵ, 𝐬ᴵ, _num_diodes, pos, time, alb) 
+    z_cur = y - yp_cur 
+
+    C = [C_mag; C_cur]
+    z = [z_mag[:]; z_cur[:]]
+
+    # Innovation   
+    Vk = Diagonal(V) 
+    # S = C*P_p*C' + Vk;  
+    
+    # Kalman Gain
+    Pyy_chol = qrᵣ([Pchol_p * C'; chol(Matrix(V))])  
+    # L = P_p * C' * S^(-1); 
+    L = ((Pchol_p' * Pchol_p * C') / Pyy_chol) / (Pyy_chol')
+
+    # Update
+    dx = L*z;    
+    dϕ = dx[1:3]; 
+    drest = dx[4:end]
+
+    θ = (norm(dϕ));
+    rTemp = dϕ / θ; 
+
+    dq = [rTemp*sin(θ/2); cos(θ/2)];
+
+    x_next = deepcopy(x)
+    x_next[1:4] = qmult(x_p[1:4], dq);
+    x_next[5:end] = x_p[5:7] + drest;
+
+    # T = (I(size(P,1)) - L*C) 
+    # P_next = T * P_p * T' + L*Vk*L';  
+    Pchol_next = qrᵣ([Pchol_p*(I-L*C)'; chol(Matrix(V))*L'] )
+
+    return x_next, Pchol_next
 end
