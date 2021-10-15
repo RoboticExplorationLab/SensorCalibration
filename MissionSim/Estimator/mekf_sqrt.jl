@@ -129,15 +129,16 @@ function new_mekf_data(alb::ALBEDO, sens::SENSORS, system, q, sat)
     Q_bias = ((estimator_params[:angle_random_walk]*(pi/180))^2)/(3600)   # This is super small
     σ_bias = sqrt(Q_bias)
 
-    σ_sunVec = deg2rad(5.0); σ_magVec = deg2rad(5.0); σ_curr = 0.008; #3, 3, 0.005
+    σ_sunVec = deg2rad(3.0); σ_magVec = deg2rad(3.0); σ_curr = 0.05; #3, 3, 0.005
     #######################################
 
-    W = Diagonal([σ_orient * ones(3); σ_bias * ones(3)])
-    V = Diagonal([σ_magVec * ones(3); σ_curr * ones(data.num_diodes)])
+    W = Diagonal([σ_orient * ones(3); σ_bias * ones(3)]).^2
+    V = Diagonal([σ_magVec * ones(3); σ_curr * ones(data.num_diodes)]).^2
     
     data.sat_state = x₀
     # sat.covariance = P₀   #### Should this be sat.covariance[1:6, 1:6] = P₀?
     sat.covariance[1:6, 1:6] = chol(P₀)
+    # sat.covariance = chol(P₀[1:6, 1:6])
     data.W = W[1:6, 1:6] # W
     data.V = V
             

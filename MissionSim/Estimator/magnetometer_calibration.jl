@@ -3,22 +3,39 @@
 ####################################################################
 
 using JLD2, Infiltrator
+using Symbolics
+
+
 function save_global_variables(sat_truth, sat_init_est)
     """
         Temporary function used to save orbit data to test various downsampling rates
     """
-    @save "orbit_data_for_mag_calib.jl" mag_field_meas_hist mag_field_pred_hist A sat_truth sat_init_est
+    @save "orbit_data_for_mag_calib2.jl" mag_field_meas_hist mag_field_pred_hist A sat_truth sat_init_est
     println("Saved Orbit data!")
 end
+
+function generate_mag_calib_matrix(sat::SATELLITE)
+    """ Generates the calibration matrix that alters the measured magnetic field vector in body frame """
+    a, b, c = sat.magnetometer.scale_factors
+    ρ, λ, ϕ = sat.magnetometer.non_ortho_angles
+
+    T = [a        0.0              0.0;
+        b*sin(ρ)  b*cos(ρ)         0.0;
+        c*sin(λ)  c*sin(ϕ)*cos(λ)  c*cos(ϕ)*cos(λ)]
+
+    return T
+end
+
+
 
 # Int(round(2 * orbit_period(oe0[1]))/_dt)
 # @info "Relies on there being no change to dt and stuff (mag cal)"  # Use an init() function? Better if no globals...
 @info "Speed up magnetometer calibration"
-max_idx = Int(round(55780/600))
-cur_idx = 0
-mag_field_meas_hist = @MArray zeros(max_idx*3)
-mag_field_pred_hist = @MArray zeros(max_idx*3)
-A = @MArray zeros(3*max_idx, 9)
+# max_idx = Int(round(55780/600))
+# cur_idx = 0
+mag_field_meas_hist = 0# @MArray zeros(max_idx*3)
+mag_field_pred_hist = 0#@MArray zeros(max_idx*3)
+A = 0#@MArray zeros(3*max_idx, 9)
 has_run = false
 
 struct MAG_CALIB 
@@ -48,27 +65,26 @@ function estimate_vals(sat::SATELLITE, data::MAG_CALIB, estimate_flag::Bool)
     """  
 
     
-    # if isempty(size(mag_field_meas_hist))  # Initialize   
-    #     global mag_field_meas_hist = data.mag_field_meas[:]    
-    #     global mag_field_pred_hist = data.mag_field_pred[:]   
-    #     global A = [(data.mag_field_pred[1]*I(3))       (data.mag_field_pred[2]*I(3))[:, 2:3]       (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
-    # else 
-    #     global mag_field_meas_hist = [mag_field_meas_hist[:]; data.mag_field_meas[:]] 
-    #     global mag_field_pred_hist = [mag_field_pred_hist[:]; data.mag_field_pred[:]] 
-    #     new_row =  [(data.mag_field_pred[1]*I(3))       (data.mag_field_pred[2]*I(3))[:, 2:3]       (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
+    if isempty(size(mag_field_meas_hist))  # Initialize   
+        global mag_field_meas_hist = data.mag_field_meas[:]    
+        global mag_field_pred_hist = data.mag_field_pred[:]   
+        global A = [(data.mag_field_pred[1]*I(3))       (data.mag_field_pred[2]*I(3))[:, 2:3]       (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
+    else 
+        global mag_field_meas_hist = [mag_field_meas_hist[:]; data.mag_field_meas[:]] 
+        global mag_field_pred_hist = [mag_field_pred_hist[:]; data.mag_field_pred[:]] 
+        new_row =  [(data.mag_field_pred[1]*I(3))       (data.mag_field_pred[2]*I(3))[:, 2:3]       (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
 
-    #     global A = [A; new_row]
-    # end
+        global A = [A; new_row]
+    end
     
+    # idx = cur_idx % max_idx # what about when it == 0? it should be max_idx instead yeah?  (cur_idx % max_idx) + 1, cur_idx\_0  = 0 != 1
+    # i₀ = (3*idx + 1)
+    # i₁ = (3*idx + 3)
+    # global mag_field_meas_hist[i₀:i₁] = data.mag_field_meas
+    # global mag_field_pred_hist[i₀:i₁] = data.mag_field_pred
+    # global A[i₀:i₁, :] .= [(data.mag_field_pred[1]*I(3))    (data.mag_field_pred[2]*I(3))[:, 2:3]    (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
 
-    idx = cur_idx % max_idx # what about when it == 0? it should be max_idx instead yeah?  (cur_idx % max_idx) + 1, cur_idx\_0  = 0 != 1
-    i₀ = (3*idx + 1)
-    i₁ = (3*idx + 3)
-    global mag_field_meas_hist[i₀:i₁] = data.mag_field_meas
-    global mag_field_pred_hist[i₀:i₁] = data.mag_field_pred
-    global A[i₀:i₁, :] .= [(data.mag_field_pred[1]*I(3))    (data.mag_field_pred[2]*I(3))[:, 2:3]    (data.mag_field_pred[3]*I(3))[:, 3]    I(3)]
-
-    global cur_idx += 1
+    # global cur_idx += 1
 
     if estimate_flag # Only estimates once enough data has been gathered
         return run_gn(sat, data)
@@ -80,14 +96,17 @@ end
 function initialize(data::MAG_CALIB)
     """ Resets system to prepare to calibrate again. Note that the data is returned unadjusted """
 
-    global mag_field_meas_hist = 0 
-    global mag_field_pred_hist = 0
-    global A = 0 
+    global mag_field_meas_hist = @MArray zeros(max_idx*3)
+    global mag_field_pred_hist = @MArray zeros(max_idx*3)
+    global A = @MArray zeros(3*max_idx, 9)
     global has_run = false
+    global cur_idx = 0
 
     return data
 end
 
+
+# @info "Gauss Newton portion commented out!"
 function run_gn(sat, data)
     """
         Runs a Gauss-Newton solver on accumulated magnetic field vector data to estimate    
@@ -104,22 +123,11 @@ function run_gn(sat, data)
 
     global has_run = true
     params = A \ mag_field_meas_hist 
+
     params = gauss_newton(params)
 
     mag_calib_matrix_est, β = parameters_to_matrix_bias(params)
     bx_est, by_est, bz_est = β[:]
-
-    # Account for sign ambiguities in the calibration matrix
-    if mag_calib_matrix_est[3,3] < 0
-        mag_calib_matrix_est[3,3] = -mag_calib_matrix_est[3,3]
-    end
-    if mag_calib_matrix_est[2,2] < 0 
-        mag_calib_matrix_est[2,2] = -mag_calib_matrix_est[2,2]
-        mag_calib_matrix_est[3,2] = -mag_calib_matrix_est[3,2]
-    end
-    if mag_calib_matrix_est[1,1] < 0
-        mag_calib_matrix_est[:, 1] = -mag_calib_matrix_est[:, 1]
-    end
 
     a_est, b_est, c_est, ρ_est, λ_est, ϕ_est = extract_parameters(mag_calib_matrix_est)
 
@@ -171,7 +179,20 @@ function parameters_to_matrix_bias(p)
 
     β = p[7:9];     # Bias vector 
 
-    return T, β[:]
+
+    # Account for sign ambiguities in the calibration matrix
+    if T[3,3] < 0
+        T[3,3] = -T[3,3]
+    end
+    if T[2,2] < 0 
+        T[2,2] = -T[2,2]
+        T[3,2] = -T[3,2]
+    end
+    if T[1,1] < 0
+        T[:, 1] = -T[:, 1]
+    end
+
+    return T, β
 end
 
 function f(bm, p)
@@ -183,13 +204,13 @@ function f(bm, p)
     return B_squared 
 end
 
-
+@info "Unclear if using correct function for residual (J or dJ/dx?)"
 function residual(x)
     """ residual vector for Gauss-Newton. rᵀr = MAP cost function
             Note that x = parameters 
             Meas = [(B_meas, B_pred) x T]
             Loss Function: 
-            J = 0.5*(B^2 - f(B,I,x))^T(B^2 - f(B,I,x))
+                J = 0.5*(B^2 - f(B,I,x))^T (B^2 - f(B,I,x))
     """
     N = Int(size(mag_field_meas_hist, 1) / 3)  # stored as [x₁ y₁ z₁ x₂ y₂ .....] so we need to divide by 3 
     r = zeros(eltype(x), (N))
@@ -223,6 +244,7 @@ function gauss_newton(x0)
         # ∂r/∂x
         _res(x) = residual(x) # residual(x, data)
         J = ForwardDiff.jacobian(_res, x)
+
 
         # calculate residual at x
         r = _res(x)

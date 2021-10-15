@@ -17,7 +17,7 @@ Base.deepcopy(s::MAGNETOMETER) = MAGNETOMETER(deepcopy(s.scale_factors), deepcop
 
 mutable struct DIODES
     calib_values::Array{Float64, 1}      #   [number of diodes, ]
-    azi_angles::Array{Float64, 1}         #   [number of diodes, ]
+    azi_angles::Array{Float64, 1}        #   [number of diodes, ]
     elev_angles::Array{Float64, 1}       #   [number of diodes, ]
 end
 Base.deepcopy(s::DIODES) = DIODES(deepcopy(s.calib_values), deepcopy(s.azi_angles), deepcopy(s.elev_angles))

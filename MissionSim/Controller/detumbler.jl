@@ -2,7 +2,7 @@
 #                        DETUMBLER                                 #
 ####################################################################
 
-struct DETUMBLER 
+struct DETUMBLER  
     ω   # Angular velocity
     Bᴮ  # Measured magnetic field vector
     dt  # Time step
@@ -29,10 +29,6 @@ function generate_command(data::DETUMBLER)
     ω = data.ω
     
     m = b_cross(ω, data.Bᴮ)
-    m_test = py"b_cross"(ω, data.Bᴮ) # Testing the Julia code against the Python
-    if !(m ≈ m_test)
-        @infiltrate
-    end
 
     return m
 end
