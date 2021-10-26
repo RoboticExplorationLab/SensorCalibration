@@ -35,7 +35,7 @@ end
 # cur_idx = 0
 mag_field_meas_hist = 0# @MArray zeros(max_idx*3)
 mag_field_pred_hist = 0#@MArray zeros(max_idx*3)
-A = 0#@MArray zeros(3*max_idx, 9)
+A = 0 #@MArray zeros(3*max_idx, 9)
 has_run = false
 
 struct MAG_CALIB 

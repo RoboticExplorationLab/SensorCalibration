@@ -100,8 +100,8 @@ class SqrtSatMekf(SqrtMekf):
 
         # Initialize noise matrices
         w = np.hstack([(self.gyro_orient_sigma2) * np.ones(3),
-                       (self.gyro_bias_sigma2) * np.ones(3),
-                       (self.diode_sigma2) * np.ones(3 * self.num_diodes) ])
+                       (self.gyro_bias_sigma2) * np.ones(3) ])
+                    #    (self.diode_sigma2) * np.ones(3 * self.num_diodes) ])
 
         v = np.hstack([(self.mag_vec_sigma2)*np.ones(3),
                        (self.curr_sigma2)*np.ones(system._num_diodes) ])
@@ -136,8 +136,11 @@ class SqrtSatMekf(SqrtMekf):
         self.q     = x_n[:4]
         self.bias  = x_n[4:7]
 
-        sat.covariance = Pchol_n 
-        sat.state      = x_n 
+        try:
+            sat.covariance = Pchol_n 
+            sat.state      = x_n 
+        except:
+            print("Could not update sat! (perhaps due to PyCall?)")
 
         return sat
 

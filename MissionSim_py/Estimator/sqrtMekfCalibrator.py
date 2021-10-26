@@ -60,6 +60,14 @@ class SqrtMekfCalibrator(SqrtSatMekf):
         t1 = np.hstack([self.Pchol, np.zeros([6, 3 * self.num_diodes])])
         t2 = np.hstack([np.zeros([3 * self.num_diodes, 6]), self.chol(diag(p))])
         self.Pchol = np.vstack([t1, t2])
+        
+        # Augment process noise matrix 
+        w_diodes = (self.diode_sigma2) * np.ones(3 * self.num_diodes)
+        w1 = np.hstack([ self.W, np.zeros([6, 3*self.num_diodes]) ])
+        w2 = np.hstack([ np.zeros([3*self.num_diodes, 6]), diag(w_diodes)])
+        self.W = np.vstack( [w1, w2])
+        
+
 
     def reset(self):
         pass

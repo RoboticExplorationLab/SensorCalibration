@@ -345,7 +345,6 @@ function split_state(x, i)
     return q, β, c, α, ϵ
 end
     
-@info "Break down large functions into cleaner subfunctions" # If the same thing is done in multiple locations accross different functions, make a helper function
 export mekf_sqrt
 function mekf_sqrt(x, Pchol, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time, alb::ALBEDO) 
     

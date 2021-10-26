@@ -1,5 +1,11 @@
 # Main file for mission simulator
 
+""" TO DO:
+        - Clean up (fresh look)
+        - Add in noise correct way (not σ * randn but rather Random(μ, σ))
+        - Remove python/julia comparisons 
+"""
+
 using Plots
 using LinearAlgebra, SatelliteDynamics        
 using Random, Distributions
@@ -11,10 +17,10 @@ using StaticArrays
 
 using Infiltrator, BenchmarkTools
 
-# Random.seed!(123412) # 1234  | Alt: 4321    
+# Random.seed!(3765) 
 
-include("mag_field.jl")            # Contains IGRF13 stuff
-include("rotationFunctions.jl"); #__init_rot_functions__()    # Contains general functions for working with attitude and quaternions
+include("mag_field.jl")          # Contains IGRF13 stuff
+include("rotationFunctions.jl"); # Contains general functions for working with attitude and quaternions
 
 include("CustomStructs.jl");         using .CustomStructs 
 include("system_config_file.jl"); 
@@ -25,7 +31,7 @@ include("Controller/Controller.jl"); using .Controller
 
 include("state_machine.jl")
 
-__init__() # Generates PyCall commands
+# __init__() # Generates PyCall commands
 
 
 @enum(Operation_mode, mag_cal = 1, detumble, diode_cal, full_control, mekf, finished, chill)
@@ -161,6 +167,39 @@ function report_on_mekf(mekf_hist, state)
         biases[:,i] = state[14:16,i]
     end
 end
+function report_on_covariance(estimates_hist, satellite_truth, N)
+    c_est = mat_from_vec([estimates_hist[i].diodes.calib_values for i = 1:N])
+    α_est = mat_from_vec([rad2deg.(estimates_hist[i].diodes.azi_angles)  for i = 1:N])
+    ϵ_est = mat_from_vec([rad2deg.(estimates_hist[i].diodes.elev_angles) for i = 1:N])
+    
+    σ_α = zeros(6, N); σ_ϵ = zeros(6, N); σ_c = zeros(6, N)
+    for j = 1:6 
+        σ_c[j,:] = [3 * sqrt(estimates_hist[i].covariance[6+j , 6+j ]' * estimates_hist[i].covariance[6+j , 6+j ]) for i = 1:N]
+        σ_α[j,:] = [3 * sqrt(estimates_hist[i].covariance[12+j, 12+j]' * estimates_hist[i].covariance[12+j, 12+j]) for i = 1:N]
+        σ_ϵ[j,:] = [3 * sqrt(estimates_hist[i].covariance[18+j, 18+j]' * estimates_hist[i].covariance[18+j, 18+j]) for i = 1:N]
+    end
+
+    error_c = c_est .- satellite_truth.diodes.calib_values
+    error_α = α_est .- rad2deg.(satellite_truth.diodes.azi_angles)
+    error_ϵ = ϵ_est .- rad2deg.(satellite_truth.diodes.elev_angles)
+
+    c_offset, e_offset, a_offset = 0.5, 1.0, 1.0
+    cp, ap, ep = Array{Plots.Plot{Plots.GRBackend}, 1}(undef, 6), Array{Plots.Plot{Plots.GRBackend}, 1}(undef, 6), Array{Plots.Plot{Plots.GRBackend}, 1}(undef, 6)
+    for i = 1:6 
+        cp[i] = plot(error_c[i,:], title="Calibration", label = false); cp[i] = plot!(σ_c[i,:], linestyle = :dash, label = false); cp[i] = plot!(-σ_c[i,:], linestyle = :dash, label = false, ylim = [-c_offset, c_offset])
+        ap[i] = plot(error_α[i,:], title="Azi Angles", label = false); ap[i] = plot!(σ_α[i,:], linestyle = :dash, label = false); ap[i] = plot!(-σ_α[i,:], linestyle = :dash, label = false, ylim = [-a_offset, a_offset])
+        ep[i] = plot(error_ϵ[i,:], title="Elev Angles",label = false); ep[i] = plot!(σ_ϵ[i,:], linestyle = :dash, label = false); ep[i] = plot!(-σ_ϵ[i,:], linestyle = :dash, label = false, ylim = [-e_offset, e_offset])
+    end
+    cp[1].series_list[1][:title] = "Calibration Values"
+    ap[1].series_list[1][:title] = "Azimuth Angles"
+    ep[1].series_list[1][:title] = "Elevation Angles"
+
+    display(plot(cp..., layout = (3, 2)));
+    display(plot(ap..., layout = (3, 2)));
+    display(plot(ep..., layout = (3, 2)));
+end
+
+###############################
 function mat_from_vec(a)  # FROM KEVIN / Attitude.jl
     "Turn a vector of vectors into a matrix"
 
@@ -175,7 +214,6 @@ function mat_from_vec(a)  # FROM KEVIN / Attitude.jl
 
     return A
 end
-
 
 run_folder = "garbage/"  
 @info "Saving results to $run_folder"
@@ -228,7 +266,6 @@ function generate_histories(sat_est)
     return x_hist, estimates_hist, sensors_hist, ground_truth_hist, noise_hist
 end
 
-
 function main()
     satellite_truth, satellite_estimate = generate_satellite()
     x_hist, estimates_hist, sensors_hist, ground_truth_hist, noise_hist = generate_histories(satellite_estimate)
@@ -237,7 +274,6 @@ function main()
     #   refl_dict = matread("../../Earth_Albedo_Model/Processed_Data/tomsdata2005/2005/ga050101-051231.mat")
     refl_dict = matread("refl.mat")     # Same as ^ but saved in local directory
     refl = refl_struct(refl_dict["data"], refl_dict["type"], refl_dict["start_time"], refl_dict["stop_time"])
-
     
     cell_centers_ecef = get_albedo_cell_centers()
     albedo = ALBEDO(refl, cell_centers_ecef)
@@ -245,20 +281,18 @@ function main()
     sim = SIM(1.0)
     x_hist[:, 1] = x0
 
-    # __init__()  # Inits python functions for PyCall
-
     progress_bar = Progress(_max_sim_length) 
 
     # Temporary histories for debugging
-    ecl_hist = zeros(_max_sim_length)
+    ecl_hist  = zeros(_max_sim_length)
     mode_hist = zeros(_max_sim_length)
 
     operation_mode = mag_cal    
     updated_data = MAG_CALIB(0.0, 0.0) 
     # updated_data = initialize(albedo, x0, SYSTEM)
-    satellite_estimate.magnetometer = satellite_truth.magnetometer 
+    # satellite_estimate.magnetometer = satellite_truth.magnetometer 
     # satellite_estimate.diodes = satellite_truth.diodes
-    flags = FLAGS(false, true, false, false, false) # in_sun, mag_cal, diodes_cal, detumbling, calibrating 
+    flags = FLAGS(false, false, false, false, false) # in_sun, mag_cal, diodes_cal, detumbling, calibrating 
 
     count = 0
     try 
@@ -268,7 +302,7 @@ function main()
             t = ground_truth_hist[i].t_hist + (i - 1) * _dt
 
             # @time -> Speed up?
-            truth, sensors, ecl, noise = generate_measurements(sim, satellite_truth, albedo, state, t, CONSTANTS, _dt)
+            truth, sensors, ecl, noise = generate_measurements_alt(sim, satellite_truth, albedo, state, t, CONSTANTS, _dt)
 
             old_op = operation_mode
             
@@ -282,7 +316,7 @@ function main()
 
             if operation_mode == mag_cal 
                 if i % _ds_rate == 0 
-                    satellite_estimate, updated_data = estimate_vals(satellite_estimate, estimator, (i > Int(round(2 * orbit_period(oe0[1]))/_dt)))  
+                    satellite_estimate, updated_data = estimate_vals(satellite_estimate, estimator, (i > Int(round(2.0 * orbit_period(oe0[1]))/_dt)))  
                 end 
             else
                 satellite_estimate, updated_data = estimate_vals(satellite_estimate, estimator)
@@ -291,14 +325,9 @@ function main()
             control_input = generate_command(controller)
 
             new_state = rk4(satellite_truth, state, control_input, t, _dt)
-            new_state[7:10] /= norm(new_state[7:10]) # Normalize quaternions
+            new_state[7:10] /= norm(new_state[7:10]) # Normalize quaternions (TODO implement something fancier)
 
             x_hist[:, i + 1] = new_state
-
-
-
-
-
 
             ### Update histories
             if flags.magnetometer_calibrated
@@ -314,7 +343,12 @@ function main()
 
             if operation_mode == finished
                 x_hist = x_hist[:, 1:(i+1)]   # Save through most recent 
-                # save_global_variables(satellite_truth, estimates_hist[1])  # Used to test magnetometer downsampling
+                save_global_variables(satellite_truth, estimates_hist[1])  # Used to test magnetometer downsampling
+                x_hist = x_hist[:, 1:count]
+                ground_truth_hist = ground_truth_hist[1:count] 
+                sensors_hist = sensors_hist[1:count]
+                @save "generated_data_stationary2.jl" x_hist ground_truth_hist sensors_hist;
+                println("Saved!")
                 break
             end
 
@@ -362,6 +396,7 @@ N = size(x_hist, 2) - 1
 # report_on_magnetometer(satellite_truth, satellite_estimate, estimates_hist[1], sensors_hist[1:N], ground_truth_hist[1:N])
 report_on_detumbler(x_hist, sensors_hist[1:N])
 report_on_diodes(satellite_truth, estimates_hist[1:N])
+report_on_covariance(estimates_hist[1:N], satellite_truth, N)
 
 
 Bᴵ = mat_from_vec([ground_truth_hist[i].Bᴵ_hist for i = 1:N])
@@ -369,31 +404,32 @@ sᴵ = mat_from_vec([ground_truth_hist[i].sᴵ_hist for i = 1:N])
 ŝᴮ = mat_from_vec([ground_truth_hist[i].ŝᴮ_hist for i = 1:N])
 Bᴮ_truth = mat_from_vec([ground_truth_hist[i].Bᴮ_hist for i = 1:N])
 t  = [ground_truth_hist[i].t_hist - _epc for i = 1:N]
-ground_truth_hist = nothing; GC.gc()
 
 Bᴮ =       mat_from_vec([sensors_hist[i].magnetometer for i = 1:N])
 currents = mat_from_vec([sensors_hist[i].diodes for i = 1:N])
-current_mag = [norm(currents[:,i]) for i = 1:N]
+current_mag   = [norm(currents[:,i]) for i = 1:N]
 current_mag_2 = [norm(currents[:, i] ./ estimates_hist[i].diodes.calib_values) for i = 1:N]
 gyro =     mat_from_vec([sensors_hist[i].gyro   for i = 1:N])
 pos =      mat_from_vec([sensors_hist[i].gps    for i = 1:N])
 ecl_est_hist = [eclipse_conical(-pos[:, i], sun_position(ground_truth_hist[i].t_hist))  for i = 1:N]
 sᴮ_ests  = mat_from_vec([estimate_sun_vector(sensors_hist[i], estimates_hist[i]) for i = 1:N])
-sᴮ_ests_mag = [norm(sᴮ_ests[:, i]) for i = 1:N]
+sᴮ_ests_mag  = [norm(sᴮ_ests[:, i]) for i = 1:N]
 
 plot(ecl_hist, label = "Eclipse", title = "Eclipse Estimation"); plot!(current_mag_2, label = "Currents"); display(hline!([0.8]))
+ground_truth_hist = nothing; GC.gc()
 sensors_hist = nothing; GC.gc()
 
 β_ests = mat_from_vec([estimates_hist[i].state[5:7] for i = 1:N])
 q_ests = mat_from_vec([estimates_hist[i].state[1:4] for i = 1:N])
-c_est = mat_from_vec([estimates_hist[i].diodes.calib_values for i = 1:N])
-α_est = mat_from_vec([rad2deg.(estimates_hist[i].diodes.azi_angles)  for i = 1:N])
-ϵ_est = mat_from_vec([rad2deg.(estimates_hist[i].diodes.elev_angles) for i = 1:N])
-C_cov = [norm(estimates_hist[i].covariance[7:12,  7:12]) for i = 1:N]
-α_cov = [norm(estimates_hist[i].covariance[13:18,13:18]) for i = 1:N]
-ϵ_cov = [norm(estimates_hist[i].covariance[19:24,19:24]) for i = 1:N]
+c_est  = mat_from_vec([estimates_hist[i].diodes.calib_values for i = 1:N])
+α_est  = mat_from_vec([rad2deg.(estimates_hist[i].diodes.azi_angles)  for i = 1:N])
+ϵ_est  = mat_from_vec([rad2deg.(estimates_hist[i].diodes.elev_angles) for i = 1:N])
+C_cov  = [norm(estimates_hist[i].covariance[7:12,  7:12]) for i = 1:N]
+α_cov  = [norm(estimates_hist[i].covariance[13:18,13:18]) for i = 1:N]
+ϵ_cov  = [norm(estimates_hist[i].covariance[19:24,19:24]) for i = 1:N]
 total_cov = [norm(estimates_hist[i].covariance[7:24, 7:24]) for i = 1:N] # Total covariance for calibration states
-estimates_hist = nothing; GC.gc()
+
+# estimates_hist = nothing; GC.gc()
 
 diode_noise = mat_from_vec([noise_hist[i].diodes for i = 1:N])
 gyro_noise  = mat_from_vec([noise_hist[i].gyro for i = 1:N])

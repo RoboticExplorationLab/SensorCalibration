@@ -72,13 +72,13 @@ using LinearAlgebra, SatelliteDynamics, Distributions
 
 # MAGNETOMETER -----------------------------------------------------------------#
     const _a, _b, _c = rand(Normal(1.0, 0.1), 3)           # Linear scale factors 
-    const _βx₀, _βy₀, _βz₀ = rand(Normal(0.0, 2), 3)       # Bias (μTeslas) (?)  ################################
+    const _βx₀, _βy₀, _βz₀ = rand(Normal(0.0, 2), 3)       # Bias (μTeslas)
     const _ρ, _ϕ, _λ = rand(Normal(0.0, deg2rad(3.0)), 3)  # Non-orthogonality non_ortho_angles
 
 # GENERAL ----------------------------------------------------------------------#
     const _dt = 0.2 #1.0  # (s)    
     const _run_freq = 1 / _dt
-    const _T = round(1.5 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
+    const _T = 10000 #round(2.25 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
     const _epc = Epoch(2021, 9, 1, 11, 0, 0, 0.0); # Initial time for sim  ############## add in randomness to time?
     const _max_sim_length = Int(_T)
     const _ds_rate = Int(round(120/_dt))

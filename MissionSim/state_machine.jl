@@ -2,22 +2,13 @@
 final_count = 0 
 temp_count = 0
 
-
-@info "Using ecl"
 function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, current_data, t, satellite_estimate)
 
 
     # if flags.magnetometer_calibrated
     #     return finished, TRIVIAL(1.0), TRIVIAL(1.0), flags
     # end
-    ##### EARLY TERMINATION CONDITIONS ########
-    if flags.diodes_calibrated && flags.magnetometer_calibrated
-        global final_count += 1
-        if final_count > 1000
-            return finished, TRIVIAL(1.0), TRIVIAL(1.0), flags
-        end
-    end
-    ###########################################
+    
     in_eclipse = norm(sens.diodes ./ satellite_estimate.diodes.calib_values) < 0.8
 
     # Split sensor measurements
@@ -53,7 +44,7 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
             end       
         else  # Calibrating DIODES   
             if !in_eclipse # norm(sens.diodes) > eclipse_threshold # If still in sun
-                if check_if_finished(satellite_estimate.covariance[7:end, 7:end], 0.004) #0.11) # 0.007) #for non-sqrt
+                if check_if_finished(satellite_estimate.covariance[7:end, 7:end], 0.1) # 0.007) #for non-sqrt
                     flags.calibrating, flags.diodes_calibrated = false, true
                 end
             else
