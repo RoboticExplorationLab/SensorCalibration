@@ -8,8 +8,22 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
     # if flags.magnetometer_calibrated
     #     return finished, TRIVIAL(1.0), TRIVIAL(1.0), flags
     # end
+
+    if flags.diodes_calibrated
+        global temp_count += 1 
+    else 
+        global temp_count = 0
+    end 
+    if temp_count > 50
+        return finished, TRIVIAL(1.0), TRIVIAL(1.0), flags 
+    end
     
-    in_eclipse = norm(sens.diodes ./ satellite_estimate.diodes.calib_values) < 0.8
+    # Prevent flickering due to noise
+    if flags.in_sun 
+        in_eclipse = norm(sens.diodes ./ satellite_estimate.diodes.calib_values) < 0.8
+    else
+        in_eclipse = norm(sens.diodes ./ satellite_estimate.diodes.calib_values) < 0.9
+    end
 
     # Split sensor measurements
     ŝᴵ = sun_position(t) - sens.gps     # Estimated sun vector 
@@ -44,7 +58,7 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
             end       
         else  # Calibrating DIODES   
             if !in_eclipse # norm(sens.diodes) > eclipse_threshold # If still in sun
-                if check_if_finished(satellite_estimate.covariance[7:end, 7:end], 0.1) # 0.007) #for non-sqrt
+                if check_if_finished(satellite_estimate.covariance[7:end, 7:end], 0.07) # 01 0.007) #for non-sqrt
                     flags.calibrating, flags.diodes_calibrated = false, true
                 end
             else
@@ -168,7 +182,7 @@ function estimate_sun_vector(sens::SENSORS, sat_est::SATELLITE)
 
         sun_vec_est /= norm(sun_vec_est)
     else
-        # Assume that we are in eclipse
+        # Assume that we are in eclipse  (this should never be called in eclipse though)
         sun_vec_est = [0; 0; 0]
     end
         

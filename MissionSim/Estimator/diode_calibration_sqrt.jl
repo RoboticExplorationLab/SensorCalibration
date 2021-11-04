@@ -145,9 +145,9 @@ function new_diode_calib(albedo, sens::SENSORS, system, q, sat)
 
     σ_q = (10*pi/180) 
     σ_β = (10*pi/180)
-    σ_c = 0.2 
-    σ_α = 2.0 #1.0 
-    σ_ϵ = 1.0 #0.3 
+    σ_c = 0.15 # 0.2 
+    σ_α = deg2rad(2.0) # 1.0 #2.0   # 2.0 is the σ used when generating these
+    σ_ϵ = deg2rad(2.0) # 0.3 #1.0 
 
     if isnan(sat.covariance[1,1]) # Setting up covariance from scratch
         p = [σ_q * ones(3); σ_β * ones(3); σ_c * ones(data.num_diodes); σ_α*ones(data.num_diodes); σ_ϵ*ones(data.num_diodes)].^2
@@ -184,8 +184,8 @@ function new_diode_calib(albedo, sens::SENSORS, system, q, sat)
     
     data.sat_state = x₀
     sat.covariance = P₀    #chol(P₀) #Matrix(chol(P₀))
-    data.W = W 
-    data.V = V
+    data.W = chol(Matrix(W))
+    data.V = chol(Matrix(V))
 
     return data
 end
@@ -346,17 +346,16 @@ function split_state(x, i)
 end
     
 export mekf_sqrt
-function mekf_sqrt(x, Pchol, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time, alb::ALBEDO) 
-    
-    # println("(JULIA) EPOCH: ", time.days, ", ", time.seconds, ", ", time.nanoseconds, ", ", time.tsys)
-    
+function mekf_sqrt(x, Pchol, cholW, cholV, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time, alb::ALBEDO) 
+
     sᴵ = @view rᴵ[1,:];  𝐬ᴵ = sᴵ / norm(sᴵ)
     Bᴵ = @view rᴵ[2,:];  𝐁ᴵ = Bᴵ / norm(Bᴵ)                
     Bᴮ = @view rᴮ[2,:];  𝐁ᴮ = Bᴮ / norm(Bᴮ)
 
     # Prediction
     x_p, A = prediction(x, w, dt, _num_diodes); # State prediction
-    Pchol_p = qrᵣ( [Pchol * A'; chol(Matrix(W))] )  # Cholesky factor
+    # Pchol_p = qrᵣ( [Pchol * A'; chol(Matrix(W))] )  # Cholesky factor
+    Pchol_p = qrᵣ( [Pchol * A'; cholW] )
 
     # Measurement
     yp_mag, C_mag = mag_measurement(x_p, 𝐁ᴵ, _num_diodes)
@@ -367,8 +366,10 @@ function mekf_sqrt(x, Pchol, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time,
     C = [C_mag; C_cur]
     z = [z_mag[:]; z_cur[:]]
 
-    Pyy_chol = qrᵣ( [Pchol_p * C'; chol(Matrix(V))] )  
+    # Pyy_chol = qrᵣ( [Pchol_p * C'; chol(Matrix(V))] )  
+    Pyy_chol = qrᵣ( [Pchol_p * C'; cholV] )  
     L = ((Pchol_p' * Pchol_p * C') / Pyy_chol) / (Pyy_chol')
+    # L₂ = (G \ ( (G' \ C) * F' * F) )'
 
     # Update
     dx = L*z;          
@@ -384,7 +385,8 @@ function mekf_sqrt(x, Pchol, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time,
     x_next[1:4] = qmult(view(x_p, 1:4), dq); 
     x_next[5:end] = view(x_p, 5:length(x_p)) + drest;
 
-    temp = [Pchol_p*(I-L*C)'; chol(Matrix(V))*L']
+    # temp = [Pchol_p*(I-L*C)'; chol(Matrix(V))*L']
+    temp = [Pchol_p*(I-L*C)'; cholV*L']
     Pchol_next = qrᵣ( temp )
 
     return x_next, Pchol_next

@@ -47,8 +47,8 @@ using LinearAlgebra, SatelliteDynamics, Distributions
     const θ = rand(Uniform(0, pi))                          
     const q0_temp =  [r * sin(θ/2); cos(θ/2)];
     const q0 = q0_temp / norm(q0_temp)
-    const w0 = deg2rad.(rand(Normal(0.0, 5.0),3))
-    # w0 = 1.25 .* deg2rad.([10, 2, -7.2]) # HOW DO I SELECT REASONABLE VALUES HERE...?    
+    # const w0 = deg2rad.(rand(Normal(0.0, 5.0),3))
+    const w0 = 1.75 .* deg2rad.([10, 2, -7.2]) # HOW DO I SELECT REASONABLE VALUES HERE...?    
 
     # Initial Bias
     const β0 = deg2rad(2.0) * randn(3)    
@@ -78,7 +78,7 @@ using LinearAlgebra, SatelliteDynamics, Distributions
 # GENERAL ----------------------------------------------------------------------#
     const _dt = 0.2 #1.0  # (s)    
     const _run_freq = 1 / _dt
-    const _T = 10000 #round(2.25 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
+    const _T = round(1 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
     const _epc = Epoch(2021, 9, 1, 11, 0, 0, 0.0); # Initial time for sim  ############## add in randomness to time?
     const _max_sim_length = Int(_T)
     const _ds_rate = Int(round(120/_dt))

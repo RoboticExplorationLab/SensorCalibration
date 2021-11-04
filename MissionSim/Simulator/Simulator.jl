@@ -15,6 +15,7 @@ include("../mag_field.jl")
 # Primary functions
 export rk4
 export generate_measurements
+export generate_measurements_alt
 
 # Simulator options:
 export SIM
@@ -104,7 +105,7 @@ function rk4(model, x, u, t, h)
 end
 
 # Still relies on old faulty eclipse
-function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONSTANTS, dt)
+function generate_measurements_OG(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONSTANTS, dt)
     """ 
         Generates sensor measurements, including noise.
 
@@ -136,13 +137,13 @@ function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONS
     ecl = eclipse_conical(-pos, sᴵₑ) # > 0.98 ? 1.0 : 0.0  # Should this be rounded...? 
     sᴵ = sᴵₑ - pos         # Sun-Sat vector
 
-    albedo_matrix, junk = albedo(pos, sᴵ, alb.refl)       # @time -> Speed up?
+    albedo_matrix, _ = albedo(pos, sᴵ, alb.refl)       # @time -> Speed up?
 
     sᴵ = ecl * (sᴵ) 
     Bᴵ = IGRF13(pos, t)
 
-    η_sun = I(3) #generate_noise_matrix(deg2rad(2.0), dt)  
-    η_mag = I(3) #generate_noise_matrix(deg2rad(2.0), dt)
+    η_sun = generate_noise_matrix(deg2rad(2.0), dt)  
+    η_mag = generate_noise_matrix(deg2rad(2.0), dt)
 
     Bᴮ = η_mag * (ᴮRᴵ * (Bᴵ)) # (noisy) Mag vector in body frame
 
@@ -176,7 +177,7 @@ function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONS
     Bᴮ = (mag_calib_matrix * Bᴮ) + sat.magnetometer.bias # Noise already added!
 
     w̃ = x[11:13] .+ x[14:16] 
-    gyro_noise =  0.02 * norm(x[11:13]) * randn(3)  
+    gyro_noise = 0.02 * norm(x[11:13]) * randn(3)  
     w̃ += gyro_noise
 
     pos = x[1:3] 
@@ -186,36 +187,33 @@ function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONS
     Bᴮ_unadjusted = (ᴮRᴵ * (Bᴵ))
 
     #########################################################################
-    Bᴵ_2, Bᴮ_2, B̃ᴮ_2 = generate_magnetic_field(view(x, 1:3), t, sat, ᴮRᴵ, dt)
-    if !(Bᴵ_2 == Bᴵ) || !(Bᴮ_2 == Bᴮ_unadjusted)
-        @infiltrate 
-    end
-
-    Itruth, Imeas, Inoise = generate_diode_currents(sat, view(x, 1:3), alb, sᴵ, 𝐬ᴮ, ecl, CONSTANTS)
-    for i = 1:6 
-        if current_vals[i] > 0.0 
-            if !(Itruth[i] ≈ (current_vals[i] - current_noises[i]) )
-                @infiltrate 
-            end
-        end
-    end
-
-    # if !((Imeas - current_noise) == (current_vals - current_noises))
+    # Bᴵ_2, Bᴮ_2, B̃ᴮ_2 = generate_magnetic_field(view(x, 1:3), t, sat, ᴮRᴵ, dt)
+    # if !(Bᴵ_2 == Bᴵ) || !(Bᴮ_2 == Bᴮ_unadjusted)
     #     @infiltrate 
     # end
 
-    w_2, w̃_2, gyro_noise_2 = generate_gyro_measurement(x) 
-    if !((w̃_2 - gyro_noise_2) ≈ (w̃ - gyro_noise))
-        @infiltrate 
-    end
+    # Itruth, Imeas, Inoise = generate_diode_currents(sat, view(x, 1:3), alb, sᴵ, 𝐬ᴮ, ecl, CONSTANTS)
+    # for i = 1:6 
+    #     if current_vals[i] > 0.0 
+    #         if !(Itruth[i] ≈ (current_vals[i] - current_noises[i]) )
+    #             @infiltrate 
+    #         end
+    #     end
+    # end
 
-    sᴵ_2, 𝐬ᴮ_2, ecl_2 = update_sun_vectors(view(x, 1:3), t, ᴮRᴵ, dt)
-    if !(sᴵ ≈ sᴵ_2) || !(𝐬ᴮ ≈ 𝐬ᴮ_2) || !(ecl_2 ≈ ecl)
-        @infiltrate 
-    end
+    # # if !((Imeas - current_noise) == (current_vals - current_noises))
+    # #     @infiltrate 
+    # # end
 
+    # w_2, w̃_2, gyro_noise_2 = generate_gyro_measurement(x) 
+    # if !((w̃_2 - gyro_noise_2) ≈ (w̃ - gyro_noise))
+    #     @infiltrate 
+    # end
 
-
+    # sᴵ_2, 𝐬ᴮ_2, ecl_2 = update_sun_vectors(view(x, 1:3), t, ᴮRᴵ, dt)
+    # if !(sᴵ ≈ sᴵ_2) || !(𝐬ᴮ ≈ 𝐬ᴮ_2) || !(ecl_2 ≈ ecl)
+    #     @infiltrate 
+    # end
     #########################################################################
     
     
@@ -231,8 +229,9 @@ end
 
 
 # ADJUST "NOISE" struct!
-function generate_measurements_alt(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONSTANTS, dt)
-    ᴮRᴵ = dcm_from_q(x[7:10])' 
+# @info "No Noise in magnetometer!"
+function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONSTANTS, dt)
+    ᴮRᴵ = dcm_from_q(view(x, 7:10))'  
 
     Bᴵ, Bᴮ, B̃ᴮ = generate_magnetic_field(view(x, 1:3), t, sat, ᴮRᴵ, dt) 
     w, w̃, gyro_noise = generate_gyro_measurement(x) 
@@ -241,17 +240,17 @@ function generate_measurements_alt(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, 
 
     I, Ĩ, current_noise = generate_diode_currents(sat, view(x, 1:3), alb, sᴵ, 𝐬ᴮ, ecl, CONSTANTS)
 
-
     sensors = SENSORS(B̃ᴮ, Ĩ, w̃, gps_meas)
     truth = GROUND_TRUTH(t, Bᴵ, sᴵ, 𝐬ᴮ, Bᴮ)
-    noise = NOISE(current_noise, gyro_noise, gps_noise, 0.0, 0.0)
+    junk_noise = zeros(3,3)
+    noise = NOISE(current_noise, gyro_noise, gps_noise, junk_noise, junk_noise)
 
     return truth, sensors, ecl, noise
 end
 
     # Specify ||η_mag||
     function generate_magnetic_field(pos, time, sat, ᴮRᴵ, dt)
-        Bᴵ = IGRF13(pos, time)    # Mag vector in inertial frame
+        Bᴵ = IGRF13(pos, time)  # Mag vector in inertial frame
         η_mag = generate_noise_matrix(deg2rad(2.0), dt)
         Bᴮ = (ᴮRᴵ * (Bᴵ))       # Mag vector in body frame
 
@@ -265,7 +264,7 @@ end
     function generate_gyro_measurement(state)
         w = @view state[11:13] 
         β = @view state[14:16]
-        gps_noise = rand(Normal( 0.05 * norm(ω), 0.005 * norm(ω)), 3)
+        gps_noise = rand(Normal( 0.05 * norm(w), 0.005 * norm(w)), 3)
         
         w̃ = w .+ β .+ gps_noise 
         return w, w̃, gps_noise
@@ -274,10 +273,10 @@ end
     # Specify ||gps_noise||
     function generate_gps_measurement(state)
         x = @view state[1:3]
-        gps_noise =  rand(Normal(5e4, 5e3), 3)
+        gps_noise = rand(Normal(5e4, 5e3), 3)
         x̃ = x + gps_noise
         
-        return x̃, gps_noise
+        return x, x̃, gps_noise
     end
 
     # Specify ||η_sun|| (adjusted η_sun from I(3) during comp)
