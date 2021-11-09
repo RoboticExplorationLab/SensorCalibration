@@ -16,7 +16,8 @@ mutable struct MEKF_DATA
     V               #  Measurement noise matrix s
     dt              #  Simulation time step           
     time            #  Current time (as an epoch) 
-    num_diodes      #  Number of photodiodes (i)   
+    num_diodes      #  Number of photodiodes (i)  
+    mag_calib_matrix # T 
 end
 
 # DOES NOT update calibration parameters
@@ -34,19 +35,19 @@ function estimate_vals(sat::SATELLITE, data::MEKF_DATA)
             - data: Updated struct containing necessary MEKF information        |  -----
     """  
     data.time += data.dt
-    x = data.sat_state[1:7]
+    x = data.sat_state[1:10]
     c, α, ϵ = sat.diodes.calib_values, sat.diodes.azi_angles, sat.diodes.elev_angles
     
     new_state, new_covariance = mekf_sqrt(x, c, α, ϵ, sat.covariance[1:6, 1:6], data.W, data.V,
                                         data.inertial_vecs, data.body_vecs, data.ang_vel, 
                                         data.current_meas, data.num_diodes, data.pos, data.dt, 
-                                        data.time, data.albedo)
+                                        data.time, data.albedo, data.mag_calib_matrix)
 
     data.sat_state = new_state 
     # data.covariance = new_covariance 
 
-    sat.state = new_state[1:7] # Only tracking the non-calibration states
-    sat.covariance[1:6, 1:6] = new_covariance
+    sat.state = new_state[1:10] # Only tracking the non-calibration states
+    sat.covariance[1:9, 1:9] = new_covariance
     return sat, data 
 end
 
@@ -65,12 +66,8 @@ function new_mekf_data(data::DIODE_CALIB)
     mekf = MEKF_DATA(data.albedo, data.sat_state[1:7], # data.covariance[1:6, 1:6], 
                         data.inertial_vecs,  data.body_vecs, data.ang_vel,
                         data.current_meas, data.pos, data.W[1:6, 1:6], data.V, 
-                        data.dt, data.time, data.num_diodes)
+                        data.dt, data.time, data.num_diodes, data.mag_calib_matrix)
 
-    # mekf = MEKF(data.albedo, data.sat_state[1:7], #.covariance, 
-    #             data.inertial_vecs, data.ang_vel, data.body_vecs,
-    #             data.current_meas, data.W, data.V, data.dt,
-    #             data.time, data.num_diodes, data.pos)
     return mekf
 end 
 
@@ -89,7 +86,7 @@ function new_mekf_data(alb::ALBEDO, sens::SENSORS, system, q, sat)
         Returns:
             - mekf:  MEKF_DATA struct                                     | MEKF_DATA
     """  
-    sat_state = zeros(7)
+    sat_state = zeros(10)
     data = MEKF_DATA(alb,        # ALBEDO 
                         sat_state,    # Satellite state ([(q⃗, q₀) β C α ϵ], NOT the same as state in simulation)
                         # 0.0,        # UPDATE with covariance  <---- does this need to be reset or passed on through eclipse?
@@ -102,50 +99,53 @@ function new_mekf_data(alb::ALBEDO, sens::SENSORS, system, q, sat)
                         0.0,          # Update with V 
                         system._dt,   # Time step
                         system._epc,  # Initial time
-                        system._num_diodes)   # Number of photodiodes on the satellite 
+                        system._num_diodes,  # Number of photodiodes on the satellite 
+                        generate_mag_calib_matrix(sat))  
 
-    β₀ = sat.state[5:7] # Continue with last estimate of bias
-    x₀ = [q; β₀] 
+    β₀_gyro = sat.state[5:7] # Continue with last estimate of bias
+    β₀_mag  = sat.state[8:10]
+    x₀ = [q; β₀_gyro; β₀_mag] 
 
-    σ_q = (10*pi/180) 
-    σ_β = (10*pi/180)
+    # σ_q = (10*pi/180) 
+    # σ_β = (10*pi/180)
+
 
     if isnan(sat.covariance[1,1]) # Setting up covariance from scratch
-        p = [σ_q * ones(3); σ_β * ones(3); zeros(18)].^2  # in theory, if we are starting the MEKF from scratch we know the calibration parameters...
+        p = [σ_q * ones(3); σ_βgyro * ones(3); σ_βmag * ones(3); zeros(18)].^2  # in theory, if we are starting the MEKF from scratch we know the calibration parameters...
         sat.covariance = (diagm(p))
     end
-    p = [σ_q * ones(3); σ_β * ones(3)].^2   # Reset Attitude and Bias covariance
+    p = [σ_q * ones(3); σ_βgyro * ones(3); σ_βmag * ones(3)].^2   # Reset Attitude and Bias covariance
     P₀ = diagm(p)
 
-    ##### VERIFY THIS SECTION ##########
-    estimator_params = (angle_random_walk      = 0.06,   # in deg/sqrt(hour)   
-                        gyro_bias_instability  = 0.8,    # Bias instability in deg/hour
-                        velocity_random_walk   = 0.014,  # in m/sec/sqrt(hour)
-                        accel_bias_instability = 6)      # in microG
+    # ##### VERIFY THIS SECTION ##########  -> IN config file?
+    # estimator_params = (angle_random_walk      = 0.06,   # in deg/sqrt(hour)   
+    #                     gyro_bias_instability  = 0.8,    # Bias instability in deg/hour
+    #                     velocity_random_walk   = 0.014,  # in m/sec/sqrt(hour)
+    #                     accel_bias_instability = 6)      # in microG
 
-    Q_gyro = ((estimator_params[:gyro_bias_instability] * (pi/180)    )^2)/(3600^3)  # Units are now rad^2/seconds^3...? => (rad/sec)^
-    σ_orient = sqrt(Q_gyro);
+    # Q_gyro = ((estimator_params[:gyro_bias_instability] * (pi/180)    )^2)/(3600^3)  # Units are now rad^2/seconds^3...? => (rad/sec)^
+    # σ_orient = sqrt(Q_gyro);
 
-    Q_bias = ((estimator_params[:angle_random_walk]*(pi/180))^2)/(3600)   # This is super small
-    σ_bias = sqrt(Q_bias)
+    # Q_bias = ((estimator_params[:angle_random_walk]*(pi/180))^2)/(3600)   # This is super small
+    # σ_bias = sqrt(Q_bias)
 
-    σ_sunVec = deg2rad(3.0); σ_magVec = deg2rad(3.0); σ_curr = 0.05; #3, 3, 0.005
-    #######################################
+    # σ_sunVec = deg2rad(3.0); σ_magVec = deg2rad(3.0); σ_curr = 0.05; #3, 3, 0.005
+    # #######################################
 
-    W = Diagonal([σ_orient * ones(3); σ_bias * ones(3)]).^2
+    W = Diagonal([σ_orient * ones(3); σ_bias_gyro * ones(3); σ_bias_mag * ones(3)]).^2
     V = Diagonal([σ_magVec * ones(3); σ_curr * ones(data.num_diodes)]).^2
     
     data.sat_state = x₀
     # sat.covariance = P₀   #### Should this be sat.covariance[1:6, 1:6] = P₀?
-    sat.covariance[1:6, 1:6] = chol(P₀)
+    sat.covariance[1:9, 1:9] = chol(P₀)
     # sat.covariance = chol(P₀[1:6, 1:6])
-    data.W = W[1:6, 1:6] # W
+    data.W = W[1:9, 1:9] # W
     data.V = V
             
     return data
 end
 
-function mag_measurement(x, 𝐁ᴵ)
+function mag_measurement(x, 𝐁ᴵ, T)
     """
         Generates what we would expect our measured magnetic field vector would be in the body frame 
             given our current estimated attitude
@@ -162,7 +162,8 @@ function mag_measurement(x, 𝐁ᴵ)
 
     x = x[:]
     q = x[1:4]
-    β = x[5:7]
+    β_gyro = x[5:7]
+    β_mag  = x[8:10]
 
     ᴮQᴵ = dcm_from_q(q)'; # DCM from quaternion (flipped)    
     𝐁ᴮ = ᴮQᴵ*𝐁ᴵ;     # this is what the measurement would be given our estimated attitude
@@ -170,9 +171,10 @@ function mag_measurement(x, 𝐁ᴵ)
     B̌ᴮ = hat(𝐁ᴮ);    # Skew-symmetric matrix
 
     ∂θ = B̌ᴮ 
-    ∂β = zeros(3, 3)
+    ∂βgyro = zeros(3, 3)
+    ∂βmag  = T
 
-    H = [∂θ ∂β]; # [3 x 6]
+    H = [∂θ ∂βgyro ∂βmag]; # [3 x 6]
     y = 𝐁ᴮ[:]    # [3 x 1]
 
     return y, H
@@ -209,8 +211,9 @@ function current_measurement(x, c, α, ϵ, 𝐬ᴵ, i, pos, time, alb::ALBEDO)
     n = [cos.(ϵ).*cos.(α) cos.(ϵ).*sin.(α) sin.(ϵ)];  # [i x 3]
     
     ∂θ = (c .* n) * šᴮ;  # [i x 3]
-    ∂β = zeros(i, 3);    # [i x 3]  
-    H = [∂θ ∂β]          # [i x 6]                                           
+    ∂βgyro = zeros(i, 3);    # [i x 3]  
+    ∂βmag  = zeros(i, 3)
+    H = [∂θ ∂βgyro ∂βmag]          # [i x 6]                                           
 
     I_meas = c .* (n * sᴮ); # Measured current, ALBEDO added in later
 
@@ -219,7 +222,7 @@ function current_measurement(x, c, α, ϵ, 𝐬ᴵ, i, pos, time, alb::ALBEDO)
     # ecl = eclipse_conical(-pos, sᴵ_unscaled) ####### NEED TO FIX TO +pos when updated
     # ecl = (ecl > 0.98) ? 1.0 : 0.0
 
-    albedo_matrix, ignore = albedo(pos, sᴵ_unscaled, alb.refl)
+    albedo_matrix, _ = albedo(pos, sᴵ_unscaled, alb.refl)
 
     for j = 1:i
         surface_normal = [cos(ϵ[j])*cos(α[j]) cos(ϵ[j])*sin(α[j]) sin(ϵ[j])]     # Photodiode surface normal 
@@ -254,9 +257,10 @@ function prediction(x, w, dt)
                         dx/dx = [dϕ/dϕ; dϕ/dβ; ...]                             
     """
     q = x[1:4]; # Quaternion portion
-    β = x[5:7]; # Bias portion
+    βgyro = x[5:7]; # Bias portion
+    βmag  = x[8:10]
 
-    γ = w - β;     # Adjusted angular velocity (w - biases)
+    γ = w - βgyro;     # Adjusted angular velocity (w - biases)
     nγ = norm(γ)
 
     θ = (nγ*dt);  
@@ -268,15 +272,17 @@ function prediction(x, w, dt)
 
     R = (I(3) + (skew/nγ)*sin(nγ*dt) + ((skew/nγ)^2)*(1 - cos(nγ*dt)));     # Rodrigues (for matrix exponential?)
 
-    A = [R -dt*I(3); zeros(3,3) I(3)]; # Jacobian of f(x)
+    # A = [R -dt*I(3); zeros(3,3) I(3)]; 
+    A = [R         -dt*I(3)   zeros(3,3);  # Jacobian of f(x)
+        zeros(3,3) I(3)      zeros(3,3);
+        zeros(3,3) zeros(3,3)      I(3)] 
 
-    xn = [qp; β]  # x at next step
+    xn = [qp; βgyro; βmag]  # x at next step
 
     return xn, A
 end
 
-
-function mekf_sqrt(x, c, α, ϵ, Pchol, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time, alb::ALBEDO) 
+function mekf_sqrt(x, c, α, ϵ, Pchol, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos, dt, time, alb::ALBEDO, T) 
     sᴵ = @view rᴵ[1,:];  𝐬ᴵ = sᴵ / norm(sᴵ)
     Bᴵ = @view rᴵ[2,:];  𝐁ᴵ = Bᴵ / norm(Bᴵ)                
     Bᴮ = @view rᴮ[2,:];  𝐁ᴮ = Bᴮ / norm(Bᴮ)
@@ -287,7 +293,7 @@ function mekf_sqrt(x, c, α, ϵ, Pchol, W, V, rᴵ, rᴮ, w, y, _num_diodes, pos
 
 
     # Measurement
-    yp_mag, C_mag = mag_measurement(x_p, 𝐁ᴵ)
+    yp_mag, C_mag = mag_measurement(x_p, 𝐁ᴵ, T)
     z_mag = 𝐁ᴮ - yp_mag 
     yp_cur, C_cur = current_measurement(x_p, c, α, ϵ, 𝐬ᴵ, _num_diodes, pos, time, alb) 
     z_cur = y - yp_cur 

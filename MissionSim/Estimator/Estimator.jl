@@ -1,23 +1,21 @@
 module Estimator
 
-# I can just include a file for each estimator to clean up, right? 
-
 using ..CustomStructs
 
-using LinearAlgebra
-using ForwardDiff
-using SatelliteDynamics
+using LinearAlgebra, ForwardDiff, SatelliteDynamics
+using Random, Distributions, StaticArrays
+using JLD2, MAT
+
+using PyCall, Infiltrator, BenchmarkTools, Test
+
 using EarthAlbedo
-# include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo 
-using Random, Distributions, StaticArrays, PyCall
+# include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo # For testing purposes 
 
 
 # Primary Functions
 export estimate_vals
 export initialize_diodes
 export initialize_magnetometer
-export initialize
-export save_global_variables ## REMOVE
 export new_diode_calib
 export new_mekf_data
 
@@ -28,16 +26,17 @@ export MAG_CALIB
 export DIODE_CALIB
 export MEKF_DATA
 
-# include("estimator_config_file.jl")
-const _E_am0 = 1366.9 # Irradiance of sunlight (TSI - visible & infrared), W/m^2 
+include("estimator_config_file.jl")   # Assorted, relevant parameters
 include("../rotationFunctions.jl")    # Contains general functions for working with quaternions
-include("magnetometer_calibration.jl")
-# include("diode_calibration.jl"); @info "Using standard MEKF for diode cal"
-include("diode_calibration_sqrt.jl"); @info "Using SQRT KF"
 
-# include("mekf.jl"); @info "Using Standard MEKF"
-# include("mekf_with_consideration.jl"); @info "Using Consider MEKF, no noise!"
-include("mekf_sqrt.jl"); @info "Using SQRT MEKF"
+include("magnetometer_calibration.jl")
+include("diode_calibration_sqrt.jl")
+include("mekf_sqrt.jl")
+
+
+####################
+# SHARED FUNCTIONS #
+####################
 
 function compute_diode_albedo(albedo_matrix, cell_centers_ecef, surface_normal, sat_pos)
     """ 
@@ -73,7 +72,8 @@ function compute_diode_albedo(albedo_matrix, cell_centers_ecef, surface_normal, 
 end
 
 function initialize_magnetometer()
-    return MAGNETOMETER(ones(3), zeros(3), zeros(3)) # Assume no bias, no non-orthogonality, and a unit scale factor 
+    """ Initializes a MAGNETOMETER object (assumes no bias, perfectly orthogonal axes, and unit scale factors """
+    return MAGNETOMETER(ones(3), zeros(3), zeros(3)) 
 end
 
 function initialize_diodes(_num_diodes)
@@ -87,6 +87,19 @@ function initialize_diodes(_num_diodes)
 
     return diode
 end
+
+function generate_mag_calib_matrix(sat::SATELLITE)
+    """ Generates the calibration matrix that alters the measured magnetic field vector in body frame """
+    a, b, c = sat.magnetometer.scale_factors
+    ρ, λ, ϕ = sat.magnetometer.non_ortho_angles
+
+    T = [a        0.0              0.0;
+        b*sin(ρ)  b*cos(ρ)         0.0;
+        c*sin(λ)  c*sin(ϕ)*cos(λ)  c*cos(ϕ)*cos(λ)]
+
+    return T
+end
+
 
 ####################################################################
 #               TRIVIAL CASE (does nothing)                        #

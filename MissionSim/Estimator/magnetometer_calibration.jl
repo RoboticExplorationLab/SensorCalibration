@@ -2,10 +2,6 @@
 #               MAGNETOMETER CALIBRATION                           #
 ####################################################################
 
-using JLD2, Infiltrator
-using Symbolics
-
-
 function save_global_variables(sat_truth, sat_init_est)
     """
         Temporary function used to save orbit data to test various downsampling rates

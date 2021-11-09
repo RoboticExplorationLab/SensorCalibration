@@ -223,8 +223,8 @@ function generate_satellite()
     # GENERATE THE TRUE SATELLITE
     magnetometer = MAGNETOMETER([_a, _b, _c], [_ρ, _λ, _ϕ], [_βx₀, _βy₀, _βz₀]) 
     diodes = DIODES(_sensor_scale_factors, _azi_angles, _elev_angles)
-    initial_state = [q0[:]; β0[:]]
-    cov = NaN * ones((3 + 3 + 3 * _num_diodes))
+    initial_state = [q0[:]; βgyro0[:]; βmag0[:]]
+    cov = NaN * ones((3 + 3 + 3 + 3 * _num_diodes))
     initial_covariance = diagm(cov)
     satellite_truth = SATELLITE(_J, magnetometer, diodes, initial_state, initial_covariance) 
 
@@ -232,7 +232,7 @@ function generate_satellite()
     m = initialize_magnetometer()
     d = initialize_diodes(_num_diodes) 
     _̂J = _J
-    state_est = [0 0 0 1 0 0 0]  # Assume no bias and unit rotation
+    state_est = [0 0 0 1 0 0 0 0 0 0]  # Assume no bias and unit rotation
     satellite_estimate = SATELLITE(_̂J, m, d, state_est, initial_covariance) # Jhat = J for now
 
     return satellite_truth, satellite_estimate
@@ -269,6 +269,7 @@ end
 
 function main()
     satellite_truth, satellite_estimate = generate_satellite()
+    x0[17:19] = satellite_truth.magnetometer.bias #####
     x_hist, estimates_hist, sensors_hist, ground_truth_hist, noise_hist = generate_histories(satellite_estimate)
     # x_hist, _, _, _, _ = generate_histories(satellite_estimate)
 
@@ -304,8 +305,8 @@ function main()
     mode_hist = zeros(_max_sim_length)
 
     operation_mode = mag_cal    
-    # updated_data = MAG_CALIB(0.0, 0.0) 
-    updated_data = initialize(albedo, x0, SYSTEM)
+    updated_data = MAG_CALIB(0.0, 0.0) 
+    # updated_data = initialize(albedo, x0, SYSTEM)
     satellite_estimate.magnetometer = satellite_truth.magnetometer 
     # satellite_estimate.diodes = satellite_truth.diodes
     flags = FLAGS(false, true, false, false, false) # in_sun, mag_cal, diodes_cal, detumbling, calibrating 
@@ -318,7 +319,7 @@ function main()
             t = _epc + (i - 1) * _dt #ground_truth_hist[i].t_hist + (i - 1) * _dt
 
             # @time -> Speed up?   # Pass in from history and modify in place?
-            truth, sensors, ecl, noise = generate_measurements(sim, satellite_truth, albedo, state, t, CONSTANTS, _dt)
+            truth, sensors, ecl, noise = generate_measurements(satellite_truth, albedo, state, t, CONSTANTS, _dt)
 
             old_op = operation_mode
             
@@ -345,8 +346,7 @@ function main()
 
             control_input = generate_command(controller)
 
-            new_state = rk4(satellite_truth, state, control_input, t, _dt)
-            new_state[7:10] /= norm(new_state[7:10]) # Normalize quaternions (TODO implement something fancier)
+            new_state = run_dynamics(satellite_truth, state, control_input, t, _dt)
 
             x_hist[:, i + 1] = new_state
 
@@ -361,6 +361,7 @@ function main()
             ecl_hist[i] = ecl
             noise_hist[i] = noise
             mode_hist[i]  = Int(operation_mode)
+
 
             # Display stuff
             change = 0

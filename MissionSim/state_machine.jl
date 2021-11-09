@@ -86,7 +86,8 @@ function update_operation_mode(flags::FLAGS, sens::SENSORS, system, albedo, curr
                                     current_data.V,             #
                                     system._dt,                 # Time step, dt
                                     current_data.time,          #
-                                    length(sens.diodes))        # Number of photodiodes
+                                    length(sens.diodes),
+                                    generate_mag_calib_matrix(satellite_estimate))        # Number of photodiodes
 
             end
             return mode, cont, est, flags, satellite_estimate
@@ -244,6 +245,18 @@ function triad(r₁ᴵ,r₂ᴵ,r₁ᴮ,r₂ᴮ)
     return q, R
 end
 
+function generate_mag_calib_matrix(sat::SATELLITE)
+    """ Generates the calibration matrix that alters the measured magnetic field vector in body frame """
+    a, b, c = sat.magnetometer.scale_factors
+    ρ, λ, ϕ = sat.magnetometer.non_ortho_angles
+
+    T = [a        0.0              0.0;
+        b*sin(ρ)  b*cos(ρ)         0.0;
+        c*sin(λ)  c*sin(ϕ)*cos(λ)  c*cos(ϕ)*cos(λ)]
+
+    return T
+end
+
 
 # For detumbler and diodes
 function check_if_finished(measurement, thresh)
@@ -268,3 +281,4 @@ function check_if_finished(sat_est::SATELLITE)
         return true
     end
 end
+

@@ -51,9 +51,10 @@ using LinearAlgebra, SatelliteDynamics, Distributions
     const w0 = 1.75 .* deg2rad.([10, 2, -7.2]) # HOW DO I SELECT REASONABLE VALUES HERE...?    
 
     # Initial Bias
-    const β0 = deg2rad(2.0) * randn(3)    
+    const βgyro0 = deg2rad(2.0) * randn(3)    
+    const βmag0 = 0 * randn(3) # Update when true bias is generated
 
-    const x0 = [eci0[:]; q0[:]; w0[:]; β0[:]]   # Initial state   | [16,]
+    x0 = [eci0[:]; q0[:]; w0[:]; βgyro0[:]; βmag0[:]]   # Initial state   | [16,]
 
 
 # DIODES -----------------------------------------------------------------------#
@@ -78,7 +79,7 @@ using LinearAlgebra, SatelliteDynamics, Distributions
 # GENERAL ----------------------------------------------------------------------#
     const _dt = 0.2 #1.0  # (s)    
     const _run_freq = 1 / _dt
-    const _T = round(1 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
+    const _T = round(0.5 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
     const _epc = Epoch(2021, 9, 1, 11, 0, 0, 0.0); # Initial time for sim  ############## add in randomness to time?
     const _max_sim_length = Int(_T)
     const _ds_rate = Int(round(120/_dt))
