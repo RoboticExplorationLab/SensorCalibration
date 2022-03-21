@@ -63,7 +63,7 @@ function new_mekf_data(data::DIODE_CALIB)
             - mekf:  MEKF_DATA struct       | MEKF_DATA
     """    
     
-    mekf = MEKF_DATA(data.albedo, data.sat_state[1:7], # data.covariance[1:6, 1:6], 
+    mekf = MEKF_DATA(data.albedo, data.sat_state[1:10], # data.covariance[1:6, 1:6], 
                         data.inertial_vecs,  data.body_vecs, data.ang_vel,
                         data.current_meas, data.pos, data.W[1:6, 1:6], data.V, 
                         data.dt, data.time, data.num_diodes, data.mag_calib_matrix)
@@ -117,26 +117,10 @@ function new_mekf_data(alb::ALBEDO, sens::SENSORS, system, q, sat)
     p = [σ_q * ones(3); σ_βgyro * ones(3); σ_βmag * ones(3)].^2   # Reset Attitude and Bias covariance
     P₀ = diagm(p)
 
-    # ##### VERIFY THIS SECTION ##########  -> IN config file?
-    # estimator_params = (angle_random_walk      = 0.06,   # in deg/sqrt(hour)   
-    #                     gyro_bias_instability  = 0.8,    # Bias instability in deg/hour
-    #                     velocity_random_walk   = 0.014,  # in m/sec/sqrt(hour)
-    #                     accel_bias_instability = 6)      # in microG
-
-    # Q_gyro = ((estimator_params[:gyro_bias_instability] * (pi/180)    )^2)/(3600^3)  # Units are now rad^2/seconds^3...? => (rad/sec)^
-    # σ_orient = sqrt(Q_gyro);
-
-    # Q_bias = ((estimator_params[:angle_random_walk]*(pi/180))^2)/(3600)   # This is super small
-    # σ_bias = sqrt(Q_bias)
-
-    # σ_sunVec = deg2rad(3.0); σ_magVec = deg2rad(3.0); σ_curr = 0.05; #3, 3, 0.005
-    # #######################################
-
     W = Diagonal([σ_orient * ones(3); σ_bias_gyro * ones(3); σ_bias_mag * ones(3)]).^2
     V = Diagonal([σ_magVec * ones(3); σ_curr * ones(data.num_diodes)]).^2
     
     data.sat_state = x₀
-    # sat.covariance = P₀   #### Should this be sat.covariance[1:6, 1:6] = P₀?
     sat.covariance[1:9, 1:9] = chol(P₀)
     # sat.covariance = chol(P₀[1:6, 1:6])
     data.W = W[1:9, 1:9] # W

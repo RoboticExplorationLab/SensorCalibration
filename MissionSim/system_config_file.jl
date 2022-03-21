@@ -79,7 +79,7 @@ using LinearAlgebra, SatelliteDynamics, Distributions
 # GENERAL ----------------------------------------------------------------------#
     const _dt = 0.2 #1.0  # (s)    
     const _run_freq = 1 / _dt
-    const _T = round(0.5 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
+    const _T = round(0.25 * orbit_period(oe0[1]) / _dt)  # Run for 2.25 orbits
     const _epc = Epoch(2021, 9, 1, 11, 0, 0, 0.0); # Initial time for sim  ############## add in randomness to time?
     const _max_sim_length = Int(_T)
     const _ds_rate = Int(round(120/_dt))

@@ -1,7 +1,15 @@
 # Main file for mission simulator
 
 """ TO DO:
-        - Clean up (fresh look)
+        - Clean up (fresh look) (ESP Main.jl, StateMachine.jl)
+        - Put plots in functions 
+        - Figure out 3σ bounds for calibration values
+        - Run parts in C (EarthAlbedo?)
+        - Make state a struct?
+
+        # plots -> function? 
+# noise_flag = True/False 
+# save_flag = True/False 
 """
 
 using Plots
@@ -16,9 +24,7 @@ using StaticArrays
 using Infiltrator, BenchmarkTools
 
 # Random.seed!(7432) 
-# plots -> function? 
-# noise_flag = True/False 
-# save_flag = True/False 
+
 
 include("mag_field.jl")          # Contains IGRF13 stuff
 include("rotationFunctions.jl"); # Contains general functions for working with attitude and quaternions
@@ -307,11 +313,12 @@ function main()
     operation_mode = mag_cal    
     updated_data = MAG_CALIB(0.0, 0.0) 
     # updated_data = initialize(albedo, x0, SYSTEM)
-    satellite_estimate.magnetometer = satellite_truth.magnetometer 
+    satellite_estimate.magnetometer = deepcopy(satellite_truth.magnetometer) 
     # satellite_estimate.diodes = satellite_truth.diodes
     flags = FLAGS(false, true, false, false, false) # in_sun, mag_cal, diodes_cal, detumbling, calibrating 
 
     count = 0
+    @info "Not updating sat truth mag.bias"
     # try 
         for i = 1:_max_sim_length
 
@@ -324,6 +331,7 @@ function main()
             old_op = operation_mode
             
             operation_mode, controller, estimator, flags = update_operation_mode(flags, sensors, SYSTEM, albedo, updated_data, t, satellite_estimate)
+            
             if old_op != operation_mode
                 println("Switched from $old_op to $operation_mode at $i ")
                 if (old_op == mag_cal) & (i > 3000)
@@ -349,6 +357,7 @@ function main()
             new_state = run_dynamics(satellite_truth, state, control_input, t, _dt)
 
             x_hist[:, i + 1] = new_state
+            # satellite_truth.magnetometer.bias = new_state[17:19]
 
             ### Update histories
             if flags.magnetometer_calibrated
@@ -361,7 +370,6 @@ function main()
             ecl_hist[i] = ecl
             noise_hist[i] = noise
             mode_hist[i]  = Int(operation_mode)
-
 
             # Display stuff
             change = 0
@@ -435,6 +443,8 @@ plot(ecl_hist[1:N], label = "Eclipse", title = "Eclipse Estimation"); plot!(curr
 # sensors_hist = nothing; GC.gc()
 
 β_ests = mat_from_vec([estimates_hist[i].state[5:7] for i = 1:N])
+βmag_ests  = mat_from_vec([estimates_hist[i].state[8:10] for i = 1:N])
+βmag_ests2 = mat_from_vec([estimates_hist[i].magnetometer.bias for i = 1:N])
 q_ests = mat_from_vec([estimates_hist[i].state[1:4] for i = 1:N])
 c_est  = mat_from_vec([estimates_hist[i].diodes.calib_values for i = 1:N])
 α_est  = mat_from_vec([rad2deg.(estimates_hist[i].diodes.azi_angles)  for i = 1:N])
@@ -462,6 +472,15 @@ a, b, c = satellite_truth.magnetometer.scale_factors
 β_truth = x_hist[14:16, 1:N]
 a = plot(β_truth', title = "Bias"); b = plot(β_ests', title = "Estimates"); c = plot((β_truth - β_ests)', title = "Errors", ylim = [-0.1, 0.1])
 display(plot(a, b, c, layout = (3,1)))
+
+βmag_truth = x_hist[17:19, 1:N]
+a = plot(βmag_truth', title = "Mag Bias"); b = plot(βmag_ests', title = "Estimates"); c = plot( (βmag_truth - βmag_ests)', title = "Errors");
+display(plot(a, b, c, layout = (3,1)))
+
+βmag_truth = x_hist[17:19, 1:N]
+a = plot(βmag_truth', title = "Mag Bias2"); b = plot(βmag_ests2', title = "Estimates"); c = plot( (βmag_truth - βmag_ests2)', title = "Errors");
+display(plot(a, b, c, layout = (3,1)))
+
 
 q_truth = x_hist[7:10, 1:N]
 a = plot(q_truth', title = "Attitude"); b = plot(q_ests', title = "Estimates", label = false); c = plot((q_truth - q_ests)', title = "Errors (1)", label = false, ylim = [-0.05, 0.05]); d = plot((q_truth + q_ests)', title = "Errors (2)", label = false, ylim = [-0.05, 0.05])

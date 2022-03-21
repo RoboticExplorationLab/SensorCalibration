@@ -40,8 +40,9 @@ function dynamics(sat::SATELLITE, x, u, t)
 
     ẇ = (sat.J^(-1)) * (u - cross(w, (sat.J*w)))
 
+    # TODO This is kind of weird in context of RK4...
     δβgyro = rand(Normal(0.0, σ_gyro_bias), 3) # β̇  looks funny so I am using δ
-    δβmag  = rand(Normal(0.0, σ_mag_bias), 3)
+    δβmag  = rand(Normal(0.0, σ_mag_bias ), 3)
 
     return [ṙ[:]; v̇[:]; q̇[:]; ẇ[:]; δβgyro[:]; δβmag[:]]
 end

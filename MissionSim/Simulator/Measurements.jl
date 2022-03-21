@@ -41,12 +41,12 @@ function generate_measurements(sat::SATELLITE, alb::ALBEDO, x, t, CONSTANTS, dt)
     r, r̃, ηr   = generate_gps_measurement( x) 
     sᴵ, 𝐬ᴮ, ecl = update_sun_vectors(view(x, 1:3), t, ᴮRᴵ, dt)
 
-    I, Ĩ, current_noise = generate_diode_currents(sat, view(x, 1:3), alb, sᴵ, 𝐬ᴮ, ecl, CONSTANTS)
+    I, Ĩ, ηI = generate_diode_currents(sat, view(x, 1:3), alb, sᴵ, 𝐬ᴮ, ecl, CONSTANTS)
 
     sensors = SENSORS(B̃ᴮ, Ĩ, w̃, r̃)
     truth = GROUND_TRUTH(t, Bᴵ, sᴵ, 𝐬ᴮ, Bᴮ)
     junk_noise = zeros(3,3)
-    noise = NOISE(current_noise, ηω, ηr, junk_noise, junk_noise)
+    noise = NOISE(ηI, ηω, ηr, junk_noise, junk_noise)
 
     return truth, sensors, ecl, noise
 end

@@ -4,7 +4,7 @@
 
 mutable struct DIODE_CALIB 
     albedo::ALBEDO  #  Albedo Struct
-    sat_state       #  Current state + calibration estimates [(q⃗, q₀) β C α ϵ]  |  [7 + 3i,]
+    sat_state       #  Current state + calibration estimates [(q⃗, q₀) βg βm C α ϵ]  |  [7 + 3i,]
     # covariance 
     inertial_vecs   #  Reference vectors in inertial frame 
     body_vecs       #  Reference vectors in body frame
@@ -35,24 +35,9 @@ function estimate_vals(sat::SATELLITE, data::DIODE_CALIB)
     data.time += data.dt   
 
     new_state, new_covariance = mekf_sqrt(data.sat_state, sat.covariance, data.W, data.V,   # CHANGED data. -> sat.
-                                        data.inertial_vecs, data.body_vecs, data.ang_vel, 
-                                        data.current_meas, data.num_diodes, data.pos, data.dt, 
-                                        data.time, data.albedo, data.mag_calib_matrix)
-
-    # P = sat.covariance' * sat.covariance
-    # state_alt, cov_alt = mekf(data.sat_state, P, data.W, data.V,   # CHANGED data. -> sat.
-    #                                     data.inertial_vecs, data.body_vecs, data.ang_vel, 
-    #                                     data.current_meas, data.num_diodes, data.pos, data.dt, 
-    #                                     data.time, data.albedo)
-
-    # if !(new_state ≈ state_alt) || !((new_covariance' * new_covariance) ≈ cov_alt)
-    #     @infiltrate 
-    # end
-
-    # @btime mekf($data.sat_state, $sat.covariance, $data.W, $data.V,   
-    #                 $data.inertial_vecs, $data.body_vecs, $data.ang_vel, 
-    #                 $data.current_meas, $data.num_diodes, $data.pos, $data.dt, 
-    #                 $data.time, $data.albedo)
+                                          data.inertial_vecs, data.body_vecs, data.ang_vel, 
+                                          data.current_meas, data.num_diodes, data.pos, data.dt, 
+                                          data.time, data.albedo, data.mag_calib_matrix)
 
     q, βgyro, βmag, c, α, ϵ = split_state(new_state, data.num_diodes)
 
@@ -98,7 +83,7 @@ function new_diode_calib(albedo, sens::SENSORS, system, q, sat)
                         generate_mag_calib_matrix(sat))   
 
     β₀_gyro = [0; 0; 0]
-    β₀_mag  = [0; 0; 0]
+    β₀_mag = sat.magnetometer.bias
     x₀ = [q; β₀_gyro; β₀_mag; sat.diodes.calib_values; sat.diodes.azi_angles; sat.diodes.elev_angles]
 
     if isnan(sat.covariance[1,1]) # Setting up covariance from scratch
@@ -189,7 +174,7 @@ function current_measurement(x, 𝐬ᴵ, i, pos, time, alb::ALBEDO)
     
     ∂θ = (c .* n) * šᴮ;     # [i x 3]
     ∂βgyro = zeros(i, 3);       # [i x 3]  
-    ∂βmag  = zeros(i, 3)
+    ∂βmag  = zeros(i, 3);
     ∂C = n * sᴮ;            # [i,]
     ∂α = c .* (ndα * sᴮ);   # [i,]
     ∂ϵ = c .* (ndϵ * sᴮ);   # [i,]  

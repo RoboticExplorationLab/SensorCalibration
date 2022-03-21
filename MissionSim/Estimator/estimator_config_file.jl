@@ -2,9 +2,11 @@
 # PHOTODIODES ------------------------------------------------------------------
 
 #NOISE VALUES! 
-const σ_q = (10*pi/180) 
-const σ_βgyro = (10*pi/180)
-const σ_βmag  = (10 * pi / 180)
+const σ_q = (10 * pi/180) 
+const σ_βgyro = (10 * pi/180)
+const σ_βmag  =10 #(10 * pi / 180)  # Covariance 
+
+# SHOULD THESE BE √?
 const σ_c = 0.15 # 0.2 
 const σ_α = deg2rad(2.0) # 1.0 #2.0   # 2.0 is the σ used when generating these
 const σ_ϵ = deg2rad(2.0) # 0.3 #1.0 
@@ -21,9 +23,9 @@ const estimator_params = (angle_random_walk      = 0.06,   # in deg/sqrt(hour)
 const Q_gyro = ((estimator_params[:gyro_bias_instability] * (pi/180)    )^2)/(3600^3)  
 const σ_orient = sqrt(Q_gyro);
 
-const Q_bias = ((estimator_params[:angle_random_walk]*(pi/180))^2)/(3600)   # This is super small
+const Q_bias = ((estimator_params[:angle_random_walk]*(pi/180))^2)/(3600)   # This is super small (~3e-10)
 const σ_bias_gyro = sqrt(Q_bias)
-const σ_bias_mag  = sqrt(Q_bias)  # TODO arbitrary
+const σ_bias_mag  = 1e-5 # 3e-2 #1.0 # Process Noise  # TODO arbitrary
 
 const Q_diode = 1e-5   # Diode Noise 
 const σ_cal = Q_diode
