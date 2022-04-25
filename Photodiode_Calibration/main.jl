@@ -8,7 +8,7 @@ Pkg.instantiate()
 using MAT, LinearAlgebra, ForwardDiff
 using JLD2
 using Random, Distributions
-using BlockDiagonals          
+# using BlockDiagonals          
 using SatelliteDynamics 
 using ProgressMeter
 using EarthAlbedo

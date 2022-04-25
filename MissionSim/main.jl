@@ -1,8 +1,5 @@
 # Main file for mission simulator
 
-""" TO DO:
-        - Clean up (fresh look)
-"""
 
 using Plots
 using LinearAlgebra, SatelliteDynamics        
@@ -12,6 +9,7 @@ using EarthAlbedo
 # include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo 
 using MAT, JLD2, PyCall
 using StaticArrays
+using SatelliteDynamics # Allows for GEOD to ECEF conversion. WARNING - Not Windows friendly
 
 using Infiltrator, BenchmarkTools
 
@@ -19,6 +17,44 @@ using Infiltrator, BenchmarkTools
 # plots -> function? 
 # noise_flag = True/False 
 # save_flag = True/False 
+
+
+# NEEDS TO BE SPED UP
+function get_albedo_cell_centers(lat_step = 1, lon_step = 1.25)
+    """
+        Returns the cell centers for the grid covering the surface of the Earth in Cartesian ECEF, to be used in later estimations of Earth's albedo,
+            by looping through each cell's LLA coordinate and converting to ECEF 
+
+        Arguments:
+        - lat_step: (Optional) The step size (in degrees) to take across the latitude domain. Defaults to 1*        | Scalar 
+        - lon_step: (Optional) The step size (in degrees) to take across the longitude domain. Defaults to 1.25*    | Scalar
+
+        Returns:
+        - cells_ecef: Matrix containing [x,y,z] coordinate for each latitude, longitude point.
+                        Of form [lat, lon, [x,y,z]]                                                                 | [num_lat x num_lon x 3]
+    """
+    alt = 0.0 # Assume all cells are on surface of earth
+    num_lat = Int(round((180 - lat_step) / lat_step) + 1)
+    num_lon = Int(round((360 - lon_step) / lon_step) + 1)
+
+    lon_offset = lon_step + (360 - lon_step) / 2   # Centers at 0 (longitude: [1.25, 360] => [-179.375, 179.375])
+    lat_offset = lat_step + (180 - lat_step) / 2   # Centers at 0 (latitude:  [1.00, 180] => [-89.5, 89.5])
+
+    cells_ecef = zeros(num_lat, num_lon, 3) # Lat, Lon, [x,y,z]
+    for lat = 1:num_lat 
+        for lon = 1:num_lon
+            geod = [(lon * lon_step - lon_offset), (lat * lat_step - lat_offset), alt]
+            ecef = sGEODtoECEF(geod, use_degrees = true)
+
+            cells_ecef[Int(lat), Int(lon), :] = ecef
+        end
+    end
+
+    return cells_ecef 
+end
+
+
+
 
 include("mag_field.jl")          # Contains IGRF13 stuff
 include("rotationFunctions.jl"); # Contains general functions for working with attitude and quaternions
@@ -276,23 +312,23 @@ function main()
     #   refl_dict = matread("../../Earth_Albedo_Model/Processed_Data/tomsdata2005/2005/ga050101-051231.mat")
     ####
     refl_dict = matread("refl.mat")     # Same as ^ but saved in local directory
-    # refl = refl_struct(refl_dict["data"], refl_dict["type"], refl_dict["start_time"], refl_dict["stop_time"])
-    # cell_centers_ecef = get_albedo_cell_centers()
+    refl = REFL(refl_dict["data"], refl_dict["type"], refl_dict["start_time"], refl_dict["stop_time"])
+    cell_centers_ecef = get_albedo_cell_centers()
     
-    data = refl_dict["data"]
-    nx, ny = size(data)
-    refl_dict_red = zeros(Int(nx/2), Int(ny/2))
+    # data = refl_dict["data"]
+    # nx, ny = size(data)
+    # refl_dict_red = zeros(Int(nx/2), Int(ny/2))
     
-    for x = 1:4:nx
-        for y = 1:4:ny
-            refl_dict_red[Int( (x+3) /4), Int( (y+3) /4)] = mean(data[x:(x+3), y:(y+3)])
-        end
-    end
-    refl = refl_struct(refl_dict_red, refl_dict["type"], refl_dict["start_time"], refl_dict["stop_time"])
-    cell_centers_ecef = get_albedo_cell_centers(4, 5)
+    # for x = 1:4:nx
+    #     for y = 1:4:ny
+    #         refl_dict_red[Int( (x+3) /4), Int( (y+3) /4)] = mean(data[x:(x+3), y:(y+3)])
+    #     end
+    # end
+    # refl = REFL(refl_dict_red, refl_dict["type"], refl_dict["start_time"], refl_dict["stop_time"])
+    # cell_centers_ecef = get_albedo_cell_centers(4, 5)
     
     albedo = ALBEDO(refl, cell_centers_ecef)
-    ####
+    # ####
 
     sim = SIM(1.0)
     x_hist[:, 1] = x0
@@ -518,55 +554,11 @@ display(plot(a,b, c, layout = (3,1))); #savefig(string(run_folder, "body_mag.png
 
 
 
+# Angle Error 
+nn = 250
+err = zeros(nn)
+for i = 1:nn
+    err[i] = rad2deg(2 * asin( norm( qmult( q_truth[:, i], qconj(q_ests[:, i]))[1:3] ) ));
+end
+display(plot(err, title = "Degrees error in attitude?"))
 
-
-
-
-# # Sensors: Truth + Mag, Est + Mag, Noise + mag, percentage of truth : noise 
-# # Gyro 
-# ŵ = gyro - β_ests; ŵ_mag = [norm(ŵ[:, i]) for i = 1:N]
-# w = x_hist[11:13,  1:N]; w_mag = [norm(w[:, i]) for i = 1:N]
-# gyro_noise_mag = [norm(gyro_noise[:, i]) for i = 1:N]
-# gyro_error = (w - ŵ); gyro_error_mag = [norm(gyro_error[:, i]) for i = 1:N]
-# a = plot(ŵ', title = "ω Est"); a = plot!(ŵ_mag, color = :black)
-# b = plot(w', title = "Truth", label = false); b = plot!(w_mag, label = false, color = :black)
-# c = plot(gyro_noise', title = "Noise", label = false); c = plot!(gyro_noise_mag, label = false, color = :black)
-# d = plot(gyro_error', title = "Error", label = false); d = plot!(gyro_error_mag, label = false, color = :black)
-# e = plot(gyro_noise_mag / w_mag)
-# display(plot(a, b, c, d, e, layout = (5, 1)))
-# display(plot(a, b, c, d, layout = (4, 1), legend = false)); 
-
-# # GPS 
-# pos_mag = [norm(pos[:, i]) for i = 1:N]
-# pos_t = x_hist[1:3,  1:N]; pos_t_mag = [norm(pos_t[:, i]) for i = 1:N]
-# gps_noise_mag = [norm(gps_noise[:, i]) for i = 1:N]
-# pos_error = (pos_t - gps_noise); pos_error_mag = [norm(pos_error[:, i]) for i = 1:N]
-# a = plot(pos', title = "Pos Est"); a = plot!(pos_mag, color = :black)
-# b = plot(pos_t', title = "Truth", label = false); b = plot!(pos_t_mag, label = false, color = :black)
-# c = plot(gps_noise', title = "Noise", label = false); c = plot!(gps_noise_mag, label = false, color = :black)
-# d = plot(pos_error', title = "Error", label = false); d = plot!(pos_error_mag, label = false, color = :black)
-# # e = plot(gps_noise_mag / pos_t_mag)
-# display(plot(a, b, c, d, layout = (4, 1)))
-
-
-# est = pos;                  est_mag = [norm(est[:, i]) for i = 1:N]
-# tru = x_hist[11:13, 1:N];   tru_mag = [norm(tru[:, i]) for i = 1:N]
-# noise = gps_noise;          noise_mag = [norm(noise[:, i]) for i = 1:N] 
-# err = (tru - est);          error_mag = [norm(err[:, i]) for i = 1:N]
-# a = plot(est', title = "Pos Est ?");                  a = plot!(est_mag, color = :black)
-# b = plot(tru', title = "Truth", label = false);     b = plot!(tru_mag, color = :black, label = false)
-# c = plot(noise', title = "Noise", label = false);   c = plot!(noise_mag, color = :black, label = false)
-# d = plot(err', title = "Error", label = false);     d = plot!(error_mag, color=:black, label = false)
-# # e = plot(tru_mag / noise_mag)
-# display(plot(a, b, c, d, e layout = (4, 1))
-
-
-# # Magnetometer 
-# est = Bᴮ; est_mag = [norm(est[:, i]) for i = 1:N]
-# tru = Bᴮ_truth; tru_mag = [norm(tru[:, i]) for i = 1:N]
-# # noise = 
-# err = (tru - est); error_mag = [norm(err[:, i]) for i = 1:N]
-# a = plot(est', title = "Mag Est");                  a = plot!(est_mag, color = :black)
-# b = plot(tru', title = "Truth", label = false);     b = plot!(tru_mag, color = :black, label = false)
-# d = plot(err', title = "Error", label = false);     d = plot!(error_mag, color=:black, label = false)
-# display(plot(a, b, d, layout = (3, 1)))

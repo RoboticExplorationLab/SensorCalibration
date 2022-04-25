@@ -2,8 +2,8 @@ module Simulator
 
 using ..CustomStructs
 using LinearAlgebra, SatelliteDynamics
-using EarthAlbedo
-# include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo;  __init_albedo__()
+# using EarthAlbedo
+include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo;  __init_albedo__()
 using Distributions, StaticArrays, PyCall
 using BenchmarkTools, Plots, SparseArrays
 
@@ -302,9 +302,7 @@ end
         current_noises = zeros(num_diodes)
         current_meas = zeros(num_diodes)
 
-        sPos = SVector{3, Float64}(pos)
-        ssᴵ  = SVector{3, Float64}(sᴵ)
-        albedo_matrix = earth_albedo(sPos, ssᴵ, alb.refl.data) 
+        albedo_matrix, junk = albedo(pos, sᴵ, alb.refl) 
 
         for i = 1:num_diodes 
             surface_normal = [(cos(ϵ[i])*cos(α[i])) (cos(ϵ[i])*sin(α[i])) sin(ϵ[i])]   # Photodiode surface normal 

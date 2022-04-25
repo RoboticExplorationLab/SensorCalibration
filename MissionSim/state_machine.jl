@@ -160,6 +160,7 @@ end
 
 
 
+# TODO verify that this is still needed (also, cant I just do this with an R matrix? (YES) Also, does this work...?)
 function estimate_sun_vector(sens::SENSORS, sat_est::SATELLITE)
     """ Estimates a (unit) sun vector using the diode measurements 
             (Note that the equation is strange because a 45° rotation @ ŷ was used to avoid boundary problems with the elevation angles) """

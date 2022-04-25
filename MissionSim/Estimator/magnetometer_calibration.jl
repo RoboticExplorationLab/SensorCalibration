@@ -3,7 +3,7 @@
 ####################################################################
 
 using JLD2, Infiltrator
-using Symbolics
+# using Symbolics
 
 
 function save_global_variables(sat_truth, sat_init_est)

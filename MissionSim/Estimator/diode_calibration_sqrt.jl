@@ -270,7 +270,10 @@ function current_measurement(x, 𝐬ᴵ, i, pos, time, alb::ALBEDO)
     # ecl = eclipse_conical(-pos, sᴵ_unscaled) ####### NEED TO FIX TO +pos when updated
     # ecl = (ecl > 0.98) ? 1.0 : 0.0
 
-    albedo_matrix, ignore = albedo(pos, sᴵ_unscaled, alb.refl)
+    sPos = SVector{3, Float64}(pos)
+    ssᴵ  = SVector{3, Float64}(sᴵ_unscaled)
+    albedo_matrix = earth_albedo(sPos, ssᴵ, alb.refl.data) 
+
 
 
     for j = 1:i

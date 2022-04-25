@@ -5,7 +5,7 @@ module Estimator
 using ..CustomStructs
 
 using LinearAlgebra
-using ForwardDiff
+# using ForwardDiff
 using SatelliteDynamics
 using EarthAlbedo
 # include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo 
