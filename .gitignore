@@ -1,0 +1,4 @@
+*.pyc
+*.pyo
+*.pdf
+src/OLD_CODE/Photodiode_Calibration/MEKF_Template_code/
