@@ -1,0 +1,2 @@
+# SIMULATOR
+This folder contains a simulator used to propogate state dynamics and generate the measurements that the various filters use. Because this file essentially plays the role of the environment, it will not be used in the actual flight and is merely for generating data to work with. 
