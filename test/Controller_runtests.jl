@@ -4,9 +4,9 @@
 
 using Test, BenchmarkTools
 using LinearAlgebra, StaticArrays
-include("Controller.jl"); using .Controller
+include("../src/MissionSim/Controller/Controller.jl"); using .Controller
 
-include("detumbler_tests.jl");
+include("Controller/detumbler_tests.jl");
 
 
 

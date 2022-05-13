@@ -3,9 +3,6 @@
 """ To Do:
 
     - Finish and test B-Dot controller 
-    - Check for allocations and type stability 
-    - Finish up documentation/comments 
-    - Make tests (and examples?)
     - Verify optimal κ (Reread paper...?)
 
     - Optimal κ; do I compute it each time? Depends on orbital period, 

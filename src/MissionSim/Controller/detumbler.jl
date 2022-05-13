@@ -1,5 +1,9 @@
 # [src/MissionSim/Controller/detumbler.jl]
 
+# TODO: Calculate the optimal value of κ (Used to be 7e-6, but I estimate it should be large...)
+
+using StaticArrays, LinearAlgebra
+
 """
     DETUMBLER(ω::SVector, Bᴮ::SVector, dt::Float)
 
@@ -18,7 +22,7 @@ struct DETUMBLER{S, T}
 
     function DETUMBLER(_ω, _Bᴮ, _dt) 
         """ Constructor for incorrect types """
-        @warn "\tDETUMBLER object made without static vectors!"
+        # @warn "\tDETUMBLER object made without static vectors!"
         S, T = length(_ω), typeof(_ω[1])
         _ω  = SVector{S, T}(_ω)
         _Bᴮ = SVector{S, T}(_Bᴮ)
@@ -40,7 +44,6 @@ function generate_command(ctrl::DETUMBLER; func = b_cross, kwargs...)
     return func(ctrl.ω, ctrl.Bᴮ; kwargs...)
 end;
 
-
 """
     b_cross(ω, Bᴮ; κ)
 
@@ -52,8 +55,8 @@ end;
 
   (NOTE this is based off of "Magnetic Detumbling of a Rigid Spacecraft" (Avanzini).)
 """
-function b_cross(ω::SVector{S, T}, Bᴮ::SVector{S, T}; κ::T = 7e-6) where {S, T}
-    """ Simple B-cross controller that commands a torque opposite the direction of rotatoin """
+function b_cross(ω::SVector{S, T}, Bᴮ::SVector{S, T}; κ::T = 5e-4) where {S, T}   # κ = 7e-6
+    """ Simple B-cross controller that commands a torque opposite the direction of rotation """
     B̂ᴮ = Bᴮ / norm(Bᴮ)  # Make unit 
  
     M = -κ * (I - (B̂ᴮ)*(B̂ᴮ)') * ω 
