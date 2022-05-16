@@ -21,6 +21,6 @@ include("detumbler.jl")
 
 export generate_command   # Interface function that is defined on all controller types
 export DETUMBLER          # Controller that detumbles the CubeSat
-
+export b_cross
 
 end

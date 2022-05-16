@@ -1,7 +1,7 @@
 # [test/Controller/detumbler_tests.jl]
 
 using Test, BenchmarkTools
-include("detumbler.jl")
+include("../src/Controller/detumbler.jl")
 
 @testset "\tDetumbler Tests" begin
 

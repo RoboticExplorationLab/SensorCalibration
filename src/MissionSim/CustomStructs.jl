@@ -1,5 +1,8 @@
 module CustomStructs
 
+# UPDATE CONSTRUCTORS (with random? Zeros? It is a huge pain rn to simplify)
+
+
 using EarthAlbedo
 # include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo 
 using SatelliteDynamics
@@ -23,6 +26,7 @@ end
 Base.deepcopy(s::DIODES) = DIODES(deepcopy(s.calib_values), deepcopy(s.azi_angles), deepcopy(s.elev_angles))
 
 
+# WHY is state necessary here...?
 mutable struct SATELLITE
     J::Array{Float64, 2}                   # Inertia Matrix of satellite  (array of 1 instead of 2 because diagonal)    |   [3 x 3]
     magnetometer::MAGNETOMETER            # Mag calibration values      |   [3, 3, 3, 3 x number of diodes]
