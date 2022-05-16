@@ -1,6 +1,7 @@
 module CustomStructs
 
 # UPDATE CONSTRUCTORS (with random? Zeros? It is a huge pain rn to simplify)
+# Add in STATE constructor (and for all?) that do and dont use SVector
 
 
 using EarthAlbedo
@@ -8,7 +9,7 @@ using EarthAlbedo
 using SatelliteDynamics
 using StaticArrays
 
-export MAGNETOMETER, DIODES, SATELLITE, SENSORS, ALBEDO, GROUND_TRUTH, ESTIMATES, TRIVIAL, FLAGS, NOISE
+export MAGNETOMETER, DIODES, SATELLITE, SENSORS, ALBEDO, GROUND_TRUTH, ESTIMATES, TRIVIAL, FLAGS, NOISE, STATE
 
 
 mutable struct MAGNETOMETER
@@ -76,6 +77,63 @@ mutable struct FLAGS
     diodes_calibrated::Bool
     detumbling::Bool
     calibrating::Bool
+end
+
+struct STATE{S, T}
+    r::SVector{3, T}   # Position (Cartesian)
+    v::SVector{3, T}   # Velocity
+    q::SVector{4, T}   # Scalar-first quaternion
+    ω::SVector{3, T}   # Angular velocity
+    β::SVector{3, T}   # Gyroscope bias
+    x::SVector{S, T}
+
+    function STATE(r::SVector{3, T}, v::SVector{3, T}, q::SVector{4, T}, ω::SVector{3, T}, β::SVector{3, T}) where {T} 
+        S = 16 #length(r) + length(v) + length(q) + length(ω) + length(β)
+        x = SVector{S, T}([r; v; q; ω; β])
+
+        new{S, T}(r, v, q, ω, β, x)
+    end
+
+    function STATE(r::Vector{T}, v::Vector{T}, q::Vector{T}, ω::Vector{T}, β::Vector{T}) where {T}
+        @warn "Initializing STATE without static arrays! Automatically converting..."
+        _r = SVector{3, T}(r)
+        _v = SVector{3, T}(v)
+        _q = SVector{4, T}(q)
+        _ω = SVector{3, T}(ω)
+        _β = SVector{3, T}(β)
+
+        STATE(_r, _v, _q, _ω, _β)  # Call the default constructor
+    end
+end
+    # Define addition, multiplication, and subtraction?  (NEEDED for RK4)
+function Base.:+(x₁::STATE, x₂::STATE) 
+    r = x₁.r + x₂.r 
+    v = x₁.v + x₂.v 
+    q = x₁.q + x₂.q 
+    ω = x₁.ω + x₂.ω 
+    β = x₁.β + x₂.β 
+
+    return STATE(r, v, q, ω, β)
+end
+
+function Base.:*(k::Real, x::STATE)
+    r = k * x.r 
+    v = k * x.v  
+    q = k * x.q  
+    ω = k * x.ω  
+    β = k * x.β  
+
+    return STATE(r, v, q, ω, β)
+end
+
+function Base.:/(x::STATE, k::Real)
+    r = x.r / k
+    v = x.v / k
+    q = x.q / k  
+    ω = x.ω / k
+    β = x.β / k 
+
+    return STATE(r, v, q, ω, β)
 end
 
 
