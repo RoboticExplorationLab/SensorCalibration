@@ -1,4 +1,4 @@
-# module simpleOrbit 
+module SimpleOrbit 
 """
     Generates a simplified orbit for a satellite, with functionality for (1) position only, 
 (2) orientation only, or (3) position and orientation. Acceleration can include J₂ if desired, 
@@ -121,7 +121,7 @@ function energy(x::Vector, m::Float64 = 0.0, J::Matrix = zeros(3, 3); g = 9.8, G
         r = @view x[1:3]
         v = @view x[4:6]
         # Eₚ = m * g * norm(r)
-        Eₚ = -G * m * Mₑ / norm(r)
+        Eₚ = G * m * Mₑ / norm(r)  # Should this be negative...?
         Eₖ = 0.5 * m * v' * v
 
         return Eₚ + Eₖ        
@@ -138,11 +138,14 @@ function energy(x::Vector, m::Float64 = 0.0, J::Matrix = zeros(3, 3); g = 9.8, G
         v =  @view x[8:10]
         ω = @view x[11:13]
 
-        # Eₚ = m * g * norm(r)
-        Eₚ = -G * m * Mₑ / norm(r)
-        Eₖ = 0.5 * m * v' * v + 0.5 * ω' * J * ω
+        E = ((1/2) * v' * v)  - (_μ / norm(r))  # Specific Orbital Energy, Vis-viva eq
 
-        return Eₚ + Eₖ
+        return E
+        # Eₚ = m * g * norm(r)
+        # Eₚ = G * m * Mₑ / norm(r)  # Should this be negative...?
+        # Eₖ = 0.5 * m * v' * v + 0.5 * ω' * J * ω
+
+        # return Eₚ + Eₖ
 
     else 
         @warn "Invalid state size!"
@@ -452,6 +455,6 @@ if false
 end
 
 
-# end
+end
 
 

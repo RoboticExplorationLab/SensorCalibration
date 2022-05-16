@@ -9,31 +9,114 @@ using LinearAlgebra   # For identity matrix
 #  - Test for type stability and allocations? 
 #  - Add in derivative, conj, etc...
 
+function hat(v::Vector{T})::Matrix{T} where {T}
+    M = zeros(T, 3, 3)
+    M[1, 2] = -v[3]
+    M[1, 3] =  v[2]
+    M[2, 1] =  v[3] 
+    M[2, 3] = -v[1]
+    M[3, 1] = -v[2]
+    M[3, 2] =  v[1]
+
+    # M =  [0.0   -v[3]  v[2];  
+    #       v[3]   0.0  -v[1]; 
+    #      -v[2]   v[1]  0.0]
+
+    return M 
+end
+
+function hat(v::SubArray{T})::Matrix{T} where {T}
+    M = zeros(T, 3, 3)
+    M[1, 2] = -v[3]
+    M[1, 3] =  v[2]
+    M[2, 1] =  v[3] 
+    M[2, 3] = -v[1]
+    M[3, 1] = -v[2]
+    M[3, 2] =  v[1]
+
+    return M 
+end
+
+function lHat(s::T, v::SubArray{T})::Matrix{T} where {T}
+    """ qₛ * I + hat(qᵥ), but  faster and fewer allocs"""
+    M = zeros(T, 3, 3)
+    M[1, 2] = -v[3]
+    M[1, 3] =  v[2]
+    M[2, 1] =  v[3] 
+    M[2, 3] = -v[1]
+    M[3, 1] = -v[2]
+    M[3, 2] =  v[1]
+
+    M[1, 1] = s 
+    M[2, 2] = s 
+    M[3, 3] = s
+
+    return M 
+end
+
+function rHat(s::T, v::SubArray{T})::Matrix{T} where {T}
+    """ qₛ * I - hat(qᵥ), but  faster and fewer allocs"""
+    M = zeros(T, 3, 3)
+    M[1, 2] =  v[3]
+    M[1, 3] = -v[2]
+    M[2, 1] = -v[3] 
+    M[2, 3] =  v[1]
+    M[3, 1] =  v[2]
+    M[3, 2] = -v[1]
+
+    M[1, 1] = s 
+    M[2, 2] = s 
+    M[3, 3] = s
+
+    return M 
+end
+
+function L(q::SubArray{T})::Matrix{T} where {T}
+    qₛ = q[1]
+    qᵥ = view(q, 2:4)      # ≈ 2ns for the pair
+
+    M = zeros(T, 4, 4)     # 25 ns, 1 alloc 200 byte
+    M[1, 1] = q[1]         # 1 ns, 0 alloc
+
+    M[1, 2:4] .= -qᵥ       # 30 ns, 1 alloc, 112 bytes  (b/c negative)
+    M[2:4, 1] .=  qᵥ       # 20 ns, 0 alloc
+    M[2:4, 2:4] .= lHat(qₛ, qᵥ) #  About 150ns faster, 3 fewer alloc, and 400 fewer bytes
+
+    return M
+end
 
 function L(q::Vector{T})::Matrix{T} where {T} 
-    qₛ, qᵥ = q[1], q[2:4]
+    qₛ = q[1]
+    qᵥ = view(q, 2:4)      # ≈ 2ns for the pair
 
-    M = [qₛ     -qᵥ'; 
-         qᵥ  (qₛ * I + hat(qᵥ)) ]
+    M = zeros(T, 4, 4)     # 25 ns, 1 alloc 200 byte
+    M[1, 1] = q[1]         # 1 ns, 0 alloc
+
+    M[1, 2:4] .= -qᵥ       # 30 ns, 1 alloc, 112 bytes  (b/c negative)
+    M[2:4, 1] .=  qᵥ       # 20 ns, 0 alloc
+    M[2:4, 2:4] .= lHat(qₛ, qᵥ) #  About 150ns faster, 3 fewer alloc, and 400 fewer bytes
+    # M[2:4, 2:4] .= qₛ * I(3) + hat(qᵥ)  # 225, 5 alloc, 750 bytes  (50 ns, 1 alloc, 160 from hat)
 
     return M
 end
 
 function R(q::Vector{T})::Matrix{T} where {T}
-    qₛ, qᵥ = q[1], q[2:4]
+    qₛ = q[1]
+    qᵥ = view(q, 2:4)      # ≈ 2ns for the pair
 
-    M = [qₛ     -qᵥ'; 
-         qᵥ  (qₛ * I - hat(qᵥ)) ]
+    M = zeros(T, 4, 4)     # 25 ns, 1 alloc 200 byte
+    M[1, 1] = q[1]         # 1 ns, 0 alloc
+
+    M[1, 2:4] .= -qᵥ       # 30 ns, 1 alloc, 112 bytes  (b/c negative)
+    M[2:4, 1] .=  qᵥ       # 20 ns, 0 alloc
+    M[2:4, 2:4] .= rHat(qₛ, qᵥ) #  About 150ns slower, 3 fewer alloc, and 400 fewer bytes
+
+    # # NOTE the below method is the same, but about 10x slower and 10x #allocations
+    # qₛ, qᵥ = q[1], q[2:4]
+    # M = [qₛ     -qᵥ';                
+    #      qᵥ  (qₛ * I - hat(qᵥ)) ]
 
     return M
-end
-
-function hat(v::Vector{T})::Matrix{T} where {T}
-    M =  [0.0   -v[3]  v[2];  
-          v[3]   0.0  -v[1]; 
-         -v[2]   v[1]  0.0]
-
-    return M 
 end
 
 const H = [zeros(1, 3); I(3)]     # Converts from a 3-element vector to a 4-element vector with 0 scalar part 
@@ -49,6 +132,15 @@ end
 ⊙(q₁::Vector, q₂::Vector) = L(q₂) * q₁
 
 # Takes q and ω → q̇
-function diff(q::Vector, ω::Vector) 
-    return 0.5 * L(q) * H * ω
+function qdot(q::Vector{T}, ω::Vector{T}) where {T}
+    q̇ = 0.5 * L(q) * H * ω
+
+    return q̇
 end
+
+function qdot(q::SubArray{T}, ω::SubArray{T}) where {T}
+    q̇ = 0.5 * L(q) * H * ω
+
+    return q̇
+end
+
