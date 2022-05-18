@@ -186,7 +186,12 @@ function qdot(q::SubArray{T}, ω::SubArray{T}) where {T}
     return q̇
 end
 
-function quat2rot(q)
+function quat2rot(q::Vector)
     return H' * L(q) * R(q)' * H
 end
+
+function quat2rot(q::SVector{4, T}) where {T} 
+    return SMatrix{3, 3, T, 9}(H' * L(q) * R(q)' * H)
+end
+
 

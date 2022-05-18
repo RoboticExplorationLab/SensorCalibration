@@ -14,13 +14,14 @@
 module Simulator 
 
 include("../CustomStructs.jl"); using .CustomStructs 
-include("../../../test/quaternions.jl")
+include("../quaternions.jl")
 using LinearAlgebra, StaticArrays 
 using EarthAlbedo, SatelliteDynamics 
 using Distributions
 
 include("dynamics.jl")
 include("measurements.jl")
+include("../mag_field.jl")
 
 export rk4 
 export generate_measurements
