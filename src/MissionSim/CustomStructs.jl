@@ -156,13 +156,13 @@ mutable struct SENSORS
     magnetometer::Array{Float64, 1}  
     diodes::Array{Float64, 1}
     gyro::Array{Float64, 1}
-    gps::Array{Float64, 1}           
+    pos::Array{Float64, 1}           
 end
 
 struct NOISE
     diodes::Array{Float64, 1}
     gyro::Array{Float64, 1}
-    gps::Array{Float64, 1}
+    pos::Array{Float64, 1}
     # sᴮ_rot::Array{Float64, 2}
     # Bᴮ_rot::Array{Float64, 2}
 end
@@ -173,12 +173,12 @@ struct ALBEDO
 end
 
 mutable struct GROUND_TRUTH # Same as sim_results?
-    t_hist::Epoch
-    Bᴵ_hist::Array{Float64, 1}
-    sᴵ_hist::Array{Float64, 1}
-    ŝᴮ_hist::Array{Float64, 1}
-    Bᴮ_hist::Array{Float64, 1}
-    I_hist::Array{Float64, 1}
+    t::Epoch
+    Bᴵ::Array{Float64, 1}
+    sᴵ::Array{Float64, 1}
+    ŝᴮ::Array{Float64, 1}
+    Bᴮ::Array{Float64, 1}
+    I::Array{Float64, 1}
 end
 
 
