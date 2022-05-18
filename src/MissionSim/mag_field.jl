@@ -1,7 +1,5 @@
-using LinearAlgebra #, SatelliteDynamics
-
+using LinearAlgebra 
 const SD = SatelliteDynamics
-
 
 function IGRF13(r_eci, epc::Epoch)
     """IGRF 13 model for NED magnetic field vector in nT
@@ -55,9 +53,6 @@ function IGRF13(r_eci, epc::Epoch)
     # convert from nT to T
     return B_eci_nT*1e-9
 end
-
-
-
 
 function my_igrf_13(date,alt,lat,elong,order)
     """Truncated IGRF model.
@@ -251,7 +246,6 @@ function my_igrf_13(date,alt,lat,elong,order)
 
   return 1e6*[x;y;z]
 end
-
 
 function ecef_Q_ned_mat(longitude,latitude)
 
