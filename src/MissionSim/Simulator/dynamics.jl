@@ -81,7 +81,7 @@ end
 
     ForwardDiff friendly (written by Kevin)
 """
-function accel_perturbations(epc::Epoch, r::SVector{3, T}, v::SVector{3, T} ;
+function accel_perturbations(epc::Epoch, r::Vector{T}, v::Vector{T} ;
                               mass::Real=1.0, area_drag::Real=0.01, coef_drag::Real=2.3, area_srp::Real=1.0, 
                               coef_srp::Real=1.8, n_grav::Integer=10, m_grav::Integer=10, third_body::Bool = true )::SVector{3, T} where {T}
 
