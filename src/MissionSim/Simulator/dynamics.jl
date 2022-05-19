@@ -124,7 +124,7 @@ function accel_perturbations(epc::Epoch, r::Vector{T}, v::Vector{T} ;
 end
 
 """
-    rk4(model, x, u, t, h)
+    rk4(J, x, u, t, h)
 
     Modified RK4 function for integrating state. Forces unit quaternions before returning.
 """

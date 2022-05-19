@@ -2,7 +2,6 @@
 
 """ To Do:
 
-    - Update README
     - Dynamics: see TODO in dynamics.jl 
     - Measurements: see TODO in measurements.jl
 """
