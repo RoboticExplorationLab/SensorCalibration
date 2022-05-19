@@ -5,9 +5,9 @@
 using StaticArrays, LinearAlgebra
 
 """
-    DETUMBLER(ω::SVector, Bᴮ::SVector, dt::Float)
+      DETUMBLER(ω::SVector, Bᴮ::SVector, dt::Float)
 
-  Simple controller that slows the rotation of the CubeSat.
+    Simple controller that slows the rotation of the CubeSat.
 """
 struct DETUMBLER{S, T}
 
@@ -28,6 +28,13 @@ struct DETUMBLER{S, T}
         _Bᴮ = SVector{S, T}(_Bᴮ)
 
         new{S, T}(_ω, _Bᴮ, _dt)
+    end
+
+    function DETUMBLER() 
+        """ Random Constructor """
+        ω  = SVector{3, Float64}(randn(3))
+        Bᴮ = SVector{3, Float64}(randn(3))
+        dt = round(5.0 * rand(), digits = 2)
     end
 end;
 

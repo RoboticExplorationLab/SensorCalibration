@@ -1,9 +1,12 @@
 # [test/Controller/detumbler_tests.jl]
 
-using Test, BenchmarkTools
+using Test, BenchmarkTools, SatelliteDynamics
 include("../src/MissionSim/Controller/detumbler.jl")
+include("SimpleOrbit.jl")
+include("../src/MissionSim/mag_field.jl")
+include("../src/MissionSim/quaternions.jl")
 
-@testset "\tDetumbler Tests" begin
+@testset "Detumbler Tests" begin
 
     @testset "(P) Struct and Interface" begin 
         """ Make sure the provided function calls work """
@@ -65,14 +68,13 @@ include("../src/MissionSim/Controller/detumbler.jl")
         """ ω × b̂ ∝ b dot """
     end
 
-    include("../../../test/SimpleOrbit.jl")
     @testset "(3) System Energy" begin 
         """ Verify that the net energy in the system decreases """
 
         # Set up a satellite, verify energy decreases
         _q0 = [1, 0, 0, 0]
         _ω0 = [2.2, 1.0, -1.0]
-        J = get_inertia() 
+        J = SimpleOrbit.get_inertia() 
 
         x0 = [_q0; _ω0]
 
@@ -81,21 +83,21 @@ include("../src/MissionSim/Controller/detumbler.jl")
         Eₓᵤ = zeros(N)
         x  = zeros(7, N); x[:,  1] = x0
         xᵤ = zeros(7, N); xᵤ[:, 1] = x0
-        Eₓ[1]  = energy(x0, 0.0, J)
-        Eₓᵤ[1] = energy(x0, 0.0, J)
+        Eₓ[1]  = SimpleOrbit.energy(x0, 0.0, J)
+        Eₓᵤ[1] = SimpleOrbit.energy(x0, 0.0, J)
         dt = 5.0   # seconds
         for i = 1:N-1
-            x[:, i+1]  = rk4(dynamics, x[:, i],  zeros(3), dt, J) # Shouldn't change
+            x[:, i+1]  = SimpleOrbit.rk4(SimpleOrbit.dynamics, x[:, i],  zeros(3), dt, J) # Shouldn't change
 
             ω  = xᵤ[5:7, i]
             Bᴮ = [1.0 * sin(i / 1000), 2.0 * cos(i / 1000), -1.0 * sin(i / 5000)]
 
             ctrl = DETUMBLER(ω, Bᴮ, dt)
             M = generate_command(ctrl; func = b_cross) 
-            xᵤ[:, i + 1] = rk4(dynamics, xᵤ[:, i], M, dt, J)
+            xᵤ[:, i + 1] = SimpleOrbit.rk4(SimpleOrbit.dynamics, xᵤ[:, i], M, dt, J)
 
-            Eₓ[i + 1] = energy(x[:,  i + 1], 0.0, J)
-            Eₓᵤ[i+ 1] = energy(xᵤ[:, i + 1], 0.0, J)
+            Eₓ[i + 1] = SimpleOrbit.energy(x[:,  i + 1], 0.0, J)
+            Eₓᵤ[i+ 1] = SimpleOrbit.energy(xᵤ[:, i + 1], 0.0, J)
         end
 
         if false
@@ -112,13 +114,11 @@ include("../src/MissionSim/Controller/detumbler.jl")
     end
 
     @testset "(4) Full State test" begin 
-        using SatelliteDynamics
-        include("../mag_field.jl")
 
         ## Generate an orbit
         _r0 = (550+6371)*(10^(3))   # Distance from two center of masses 
         _a  = 1.2 * _r0             # Semi-major axis of (elliptical) orbit (circular orbit if a = r0)
-        _v0 = sqrt(_μ*( (2/_r0) - (1/_a))) 
+        _v0 = sqrt(SimpleOrbit._μ*( (2/_r0) - (1/_a))) 
         _q0 = [1; 0; 0; 0]
         _ω0 = [0.2; -1.0; 0.5]
 
@@ -128,7 +128,7 @@ include("../src/MissionSim/Controller/detumbler.jl")
         _v0 = [0.0; _v0; 0.0]
 
         x0 = [_r0;  _q0;  _v0;  _ω0]
-        J = get_inertia(; m = _m)
+        J = SimpleOrbit.get_inertia(; m = _m)
 
         ## Set up simulation
         N = 1000
@@ -141,15 +141,15 @@ include("../src/MissionSim/Controller/detumbler.jl")
         # Set up energy vectors
         Eₓ  = zeros(N)
         Eₓᵤ = zeros(N)
-        Eₓ[1]  = energy(x0, _m, J)
-        Eₓᵤ[1] = energy(x0, _m, J)
+        Eₓ[1]  = SimpleOrbit.energy(x0, _m, J)
+        Eₓᵤ[1] = SimpleOrbit.energy(x0, _m, J)
 
         Bᴮs = []
 
         for i = 1:N-1
             # Reference, uncontrolled orbit
-            x[:, i+1]  = rk4(dynamics, x[:, i],  zeros(3), dt, J) # No control input, spin shouldn't change
-            Eₓ[i + 1] = energy(x[:,  i + 1], _m, J)
+            x[:, i+1]  = SimpleOrbit.rk4(SimpleOrbit.dynamics, x[:, i],  zeros(3), dt, J) # No control input, spin shouldn't change
+            Eₓ[i + 1] = SimpleOrbit.energy(x[:,  i + 1], _m, J)
 
             # Controlled orbit 
             ω  = xᵤ[11:13, i]
@@ -160,8 +160,8 @@ include("../src/MissionSim/Controller/detumbler.jl")
 
             ctrl = DETUMBLER(ω, Bᴮ, dt)
             M = generate_command(ctrl; func = b_cross, κ = 0.01)
-            xᵤ[:, i + 1] = rk4(dynamics, xᵤ[:, i], M, dt, J)
-            Eₓᵤ[i+ 1] = energy(xᵤ[:, i + 1], _m, J)
+            xᵤ[:, i + 1] = SimpleOrbit.rk4(SimpleOrbit.dynamics, xᵤ[:, i], M, dt, J)
+            Eₓᵤ[i+ 1] = SimpleOrbit.energy(xᵤ[:, i + 1], _m, J)
         end
 
         if false
@@ -181,7 +181,7 @@ include("../src/MissionSim/Controller/detumbler.jl")
         @test minimum(Eₓ - Eₓᵤ) ≥ 0.0
     end
 
-    # EMPTY 
+    # EMPTY - no bonus tests for you
     @testset "(5) Bonus tests " begin 
         """ (verify it 𝑑𝑜𝑒𝑠𝑛𝑡 work when parallel?) """
 
