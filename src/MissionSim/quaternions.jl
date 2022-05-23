@@ -1,6 +1,8 @@
 # [test/quaternions.jl] 
 
 """ Common functions used when working with quaternions (assumes scalar first!) """
+# This really needs to be tidied up and tested
+
 
 using LinearAlgebra   # For identity matrix 
 
@@ -25,6 +27,18 @@ function hat(v::Vector{T})::Matrix{T} where {T}
     return M 
 end
 
+function hat(v::SVector{3, T})::SMatrix{3, 3, T, 9} where {T}
+    M = zeros(T, 3, 3)
+    M[1, 2] = -v[3]
+    M[1, 3] =  v[2]
+    M[2, 1] =  v[3] 
+    M[2, 3] = -v[1]
+    M[3, 1] = -v[2]
+    M[3, 2] =  v[1]
+
+    return SMatrix{3, 3, T, 9}(M)
+end
+
 function hat(v::SubArray{T})::Matrix{T} where {T}
     M = zeros(T, 3, 3)
     M[1, 2] = -v[3]
@@ -35,6 +49,12 @@ function hat(v::SubArray{T})::Matrix{T} where {T}
     M[3, 2] =  v[1]
 
     return M 
+end
+
+function hat(v)
+    return V = [0    -v[3]  v[2];
+                v[3]  0.0  -v[1];
+               -v[2]  v[1]  0.0]
 end
 
 function lHat(s::T, v::SubArray{T})::Matrix{T} where {T}
@@ -192,6 +212,21 @@ end
 
 function quat2rot(q::SVector{4, T}) where {T} 
     return SMatrix{3, 3, T, 9}(H' * L(q) * R(q)' * H)
+end
+
+function att_jac(q)
+    return G(SVector{4, typeof(q)}(q))
+end
+
+function G(q::SVector{4, T}) where {T}
+    qₛ = q[1] 
+    qᵥ = q[2:4]
+
+    G = zeros(T, 4, 3)
+    G[1,   :] .= -qᵥ
+    G[2:4, :] .= qₛ * I(3) + hat(qᵥ)
+
+    return G
 end
 
 
