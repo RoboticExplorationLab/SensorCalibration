@@ -14,11 +14,16 @@ using StaticArrays, Plots, LinearAlgebra, Distributions, ForwardDiff
 
 include("../CustomStructs.jl");  using .CustomStructs 
 
+
 include("magnetometer_calibration.jl")
 include("diode_calibration.jl")
 include("mekf.jl")
 
 export estimate
+
+
+
+
 
 end
 

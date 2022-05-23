@@ -251,7 +251,7 @@ function current_measurement(x, 𝐬ᴵ, i, pos, time, alb::ALBEDO)
     sᴮ = ᴮQᴵ * 𝐬ᴵ
 
     šᴮ= hat(sᴮ);  # Skew-symmetric form
-    n = [cos.(ϵ).*cos.(α) cos.(ϵ).*sin.(α) sin.(ϵ)];  # [i x 3]
+    n   = [cos.(ϵ).*cos.(α) cos.(ϵ).*sin.(α) sin.(ϵ)];  # [i x 3]
     ndα = [(-cos.(ϵ).*sin.(α)) (cos.(ϵ).*cos.(α)) zeros(size(α))];
     ndϵ = [(-sin.(ϵ).*cos.(α)) ((-sin.(ϵ).*sin.(α))) cos.(ϵ)]; # (With negative middle term, differing from the paper)
     
@@ -292,6 +292,8 @@ function current_measurement(x, 𝐬ᴵ, i, pos, time, alb::ALBEDO)
     y = I_meas[:]             # [i x 1]        
     return y, H
 end
+
+
 
 # Make a "Rodrigues" helper function in the rotationFunctions.jl script?
 export prediction

@@ -1,8 +1,7 @@
-# [src/MissionSim/Estimator/Estimator/magnetometer_calibration.jl]
+# [src/MissionSim/Estimator/magnetometer_calibration.jl]
 
 """ To Do:
       Add:
-       - Comments (potentially one with the linear least squares equation?)
        - Way to deal with failures
 
     - Adjust main so this is only called when data is full
