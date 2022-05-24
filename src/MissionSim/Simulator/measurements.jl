@@ -121,13 +121,13 @@ end
       - ηw: Gyroscope noise                                                            | [3,] (Static)
           (Note that this is really just tracked for debugging purposes)
 """
-function gyro_measurement(x::STATE; σ_scale = 0.005) 
+function gyro_measurement(x::STATE{T}; σ_scale = 0.005) where {T}
 
     ηω = rand(Normal(0.0, σ_scale * norm(x.ω)), 3)  # Noise scales with actual value
 
     ω̃  = x.ω .+ x.β .+ ηω
 
-    return x.ω, ω̃ , ηω
+    return x.ω, SVector{3, T}(ω̃ ), SVector{3, T}(ηω)
 end
 
 # (Note that r is tracked in state, but this allows for some adjustments); no longer have a μ
@@ -207,8 +207,8 @@ end
     - ηI:  Current noise added to the measurement                                          | [N,]  Scalar
               (Note that this is really just tracked for debugging purposes)
 """  
-function diode_measurement(sat::SATELLITE{N, T}, alb::ALBEDO, x::STATE{Sₓ, T}, ecl::Real, sᴵ::SVector{3, T}, sᴮ::SVector{3, T}; 
-                            σ_scale = 0.05, E_am₀ = 1366.9)::Tuple{SVector{N, T}, SVector{N, T}, SVector{N, T}} where {N, Sₓ, T}
+function diode_measurement(sat::SATELLITE{N, T}, alb::ALBEDO, x::STATE{T}, ecl::Real, sᴵ::SVector{3, T}, sᴮ::SVector{3, T}; 
+                            σ_scale = 0.05, E_am₀ = 1366.9)::Tuple{SVector{N, T}, SVector{N, T}, SVector{N, T}} where {N, T}
 
     if (ecl == 0)   # No need to waste time calculating in eclipse - I = 0, Ĩ is just noise
         η = SVector{N, T}(rand(Normal(0.0, σ_scale * 0.001), N))
@@ -314,7 +314,8 @@ end
 
 """ 
       Estimates the effect of Earth's albedo on a specific photodiode (by using the surface normal of that diode)
-    (NOTE that this comes from the Springmann paper referenced in the Estimator section about photodiode calibration)
+    (NOTE that this comes from the Springmann paper referenced in the Estimator section about photodiode calibration).
+    There is also a duplciate version of this in the Estimators file, kept separate from the Simulator files.
        
       = cell_albedo * surface_normal^T * r_g,
     with r_g as a unit vector in the direction of the grid point on Earth

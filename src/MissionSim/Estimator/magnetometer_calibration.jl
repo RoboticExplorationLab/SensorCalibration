@@ -173,7 +173,7 @@ function estimate(sat::SATELLITE, data::MAG_CALIBRATOR{T}) where {T}
                                SVector{3, T}(β̂x, β̂y, β̂z) )
                             
         # Because structs are immutable, we just make a new one and copy the relevant stuff over 
-        sat_est = SATELLITE(sat.J, mag_est, sat.diodes) 
+        sat_est = SATELLITE(; J = sat.J, mag = mag_est, dio = sat.diodes) 
 
         return sat_est, data
     end

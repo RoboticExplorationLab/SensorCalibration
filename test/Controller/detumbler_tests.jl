@@ -1,10 +1,10 @@
 # [test/Controller/detumbler_tests.jl]
 
 using Test, BenchmarkTools, SatelliteDynamics
-include("../src/MissionSim/Controller/detumbler.jl")
-include("SimpleOrbit.jl")
-include("../src/MissionSim/mag_field.jl")
-include("../src/MissionSim/quaternions.jl")
+include("../../src/MissionSim/Controller/detumbler.jl")
+include("../SimpleOrbit.jl")
+include("../../src/MissionSim/mag_field.jl")
+include("../../src/MissionSim/quaternions.jl")
 
 @testset "Detumbler Tests" begin
 

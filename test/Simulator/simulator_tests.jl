@@ -86,10 +86,7 @@
 
     @testset "  Sequence, simplified" begin 
         # No noise, bias, fancy gravity terms, etc...
-        perfect_mag = Simulator.MAGNETOMETER( SVector{3, Float64}(1.0, 1.0, 1.0),   # Scale factor 
-                                    SVector{3, Float64}(0.0, 0.0, 0.0),   # Non-orthogonality angles
-                                    SVector{3, Float64}(0.0, 0.0, 0.0));  # Bias
-
+        perfect_mag = Simulator.MAGNETOMETER(; ideal = true);  
 
         x = Simulator.STATE(; β = SVector{3, Float64}(0.0, 0.0, 0.0), ω = SVector{3, Float64}(-0.1, 0.1, 0.25)) 
         u = SVector{3, Float64}( zeros(3) ) 

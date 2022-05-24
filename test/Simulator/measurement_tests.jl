@@ -245,7 +245,7 @@
         sat = Simulator.SATELLITE() 
         x   = Simulator.STATE() 
         ecl = 1.0 
-        sᴵ  = SVector{3, Float64}(1e11 * [1.0, 0.0, 0.0])
+        sᴵ  = SVector{3, Float64}(1AU * [1.0, 0.0, 0.0])
         sᴮ  = [1.0, 0.0, 1.0];  sᴮ = SVector{3, Float64}(sᴮ / norm(sᴮ))
 
         function albTest(a₁, a₂, a₃, sat, x, ecl, sᴵ, sᴮ; verbose = false)
@@ -299,7 +299,7 @@
         @test sum(abs.(ηI)) == 0.0
 
         # Different number of diodes
-        sat = Simulator.SATELLITE(; dio = Simulator.DIODES(; N = 10))
+        sat = Simulator.SATELLITE(; sta = Simulator.SAT_STATE(; N = 10), dio = Simulator.DIODES(; N = 10))
         ecl = 1.0
         I, Ĩ, ηI = Simulator.diode_measurement(sat, a₂, x, ecl, sᴵ, sᴮ; σ_scale = 0.5);
         @test I[I .> 0.0] ≈ (Ĩ - ηI)[I .> 0.0]
@@ -447,9 +447,7 @@
     end;
 
     @testset "  Generate Measurements" begin
-        perfect_mag = Simulator.MAGNETOMETER( SVector{3, Float64}(1.0, 1.0, 1.0),   # Scale factor 
-                                    SVector{3, Float64}(0.0, 0.0, 0.0),   # Non-orthogonality angles
-                                    SVector{3, Float64}(0.0, 0.0, 0.0));  # Bias
+        perfect_mag = Simulator.MAGNETOMETER( ideal = true);  
 
 
         # @code_warntype generate_measurements(sat, alb, x, t, dt)

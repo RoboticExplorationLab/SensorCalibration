@@ -38,7 +38,7 @@
     Returns:
       - x:   updated STATE struct                                     |  STATE
 """
-function dynamics(J::SMatrix{3, 3, T, 9}, x::STATE{S, T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = deg2rad(0.1), kwargs...) where {S, T}
+function dynamics(J::SMatrix{3, 3, T, 9}, x::STATE{T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = deg2rad(0.1), kwargs...) where {T}
 
     if norm(x.r) < Rₑ                  
         error("ERROR: Impact at time $t")
@@ -55,7 +55,7 @@ end
 
 
 """ Alternate function call that uses an array for state rather than a struct """
-function dynamics(J::SMatrix{3, 3, T, 9}, x::SVector{S, T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = deg2rad(0.1), kwargs...)::SVector{S, T} where {S, T}
+function dynamics(J::SMatrix{3, 3, T, 9}, x::SVector{T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = deg2rad(0.1), kwargs...)::SVector{16, T} where {T}
 
     if norm(@view x[1:3]) < Rₑ                  
         error("ERROR: Impact at time $t")
@@ -69,7 +69,7 @@ function dynamics(J::SMatrix{3, 3, T, 9}, x::SVector{S, T}, u::SVector{3, T}, t:
     ω̇ = J \ (u - cross(ω, J * ω))   
     β̇ = rand(Normal(0.0, σβ), 3)    
 
-    return SVector{S, T}([ṙ; v̇; q̇; ω̇ ; β̇ ])
+    return SVector{16, T}([ṙ; v̇; q̇; ω̇ ; β̇ ])
 end
 
 
@@ -128,7 +128,7 @@ end
 
     Modified RK4 function for integrating state. Forces unit quaternions before returning.
 """
-function rk4(J::SMatrix{3, 3, T, 9}, x::STATE{S, T}, u::SVector{3, T}, t::Epoch, h::Real; kwargs...) where {S, T} 
+function rk4(J::SMatrix{3, 3, T, 9}, x::STATE{T}, u::SVector{3, T}, t::Epoch, h::Real; kwargs...) where {T} 
     k₁ = h * dynamics(J, x, u, t; kwargs...)
     k₂ = h * dynamics(J, x + k₁/2, u, t + h/2; kwargs...)
     k₃ = h * dynamics(J, x + k₂/2, u, t + h/2; kwargs...)
@@ -141,7 +141,7 @@ end
       Alternate function call for rk4 that takes in a vector for state rather than a struct 
     NOTE that this does NOT normalize the quaternions
 """
-function rk4(J::SMatrix{3, 3, T, 9}, x::SVector{S, T}, u::SVector{3, T}, t::Epoch, h::Real; kwargs...) where {S, T} 
+function rk4(J::SMatrix{3, 3, T, 9}, x::SVector{T}, u::SVector{3, T}, t::Epoch, h::Real; kwargs...) where {T} 
     k₁ = h * dynamics(J, x, u, t; kwargs...)
     k₂ = h * dynamics(J, x + k₁/2, u, t + h/2; kwargs...)
     k₃ = h * dynamics(J, x + k₂/2, u, t + h/2; kwargs...)

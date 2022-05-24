@@ -15,7 +15,7 @@ using .Estimator.CustomStructs  # so can just call them directly with Estimator.
 include("../src/MissionSim/quaternions.jl")
 include("../src/MissionSim/mag_field.jl")
 
-include("Estimator/magnetometer_calibration_tests.jl");
+# include("Estimator/magnetometer_calibration_tests.jl");
 
 function chol(M)
     # return cholesky(Symmetric(M)).U 

@@ -9,6 +9,7 @@ using Plots, EarthAlbedo, JLD2
 using StaticArrays, LinearAlgebra, SatelliteDynamics, Distributions 
 
 include("../src/MissionSim/Simulator/Simulator.jl"); using .Simulator
+
 include("SimpleOrbit.jl")
 
 include("../src/MissionSim/quaternions.jl");
