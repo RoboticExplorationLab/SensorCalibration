@@ -13,7 +13,8 @@
 
 module Controller
 
-include("../CustomStructs.jl"); using .CustomStructs
+# include("../CustomStructs.jl"); using .CustomStructs
+using ..CustomStructs
 using LinearAlgebra 
 using StaticArrays
 

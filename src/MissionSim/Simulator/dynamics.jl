@@ -6,13 +6,15 @@
 
     To Do:
       Add:
-      - Add in drag that is dependent on orientation?
+      - Add in drag that is dependent on orientation? and SRP
       - Process noise...? Maybe?
 
       Fix/Update:
+      - Get accurate defaults for accel_perturbations
       - Get accurate gyro bias values
       - Speed up accel_perturbations? (it is ≈50x slower than the rest combined)
       - More sophisticated method for quaternions than just normalizing (matrix exponential?)
+      - add tick marks `` to argument names in descriptions
 """
 
 
@@ -21,19 +23,19 @@
       
     Propagates the state dynamics for a satellite, where the state is (probably) defined 
     as [position, velocity, scalar-first quaternion, angular velocity, gyro bias]
-      'x = [r⃗, v⃗, (q₀, q⃗), ω, β]'
+      `x = [r⃗, v⃗, (q₀, q⃗), ω, β]`
 
     Includes gravity from spherical harmonics, uniform drag, SRP, and third body 
     gravity from the sun and moon. 
     (NOTE that there are a few slight variations to the function call)
 
     Arguments:
-      - J:   Inertia matrix (as a Static Matrix)                      |  [3, 3]  (Static) 
-      - x:   STATE struct                                             |  STATE
-      - u:   control input (for rotation only)                        |  [3,]    (Static)
-      - t:   Current time (as an epoch)                               |  Epoch
-      - Rₑ:  (Optional) Radius of the Earth (default is meters)       |  Scalar
-      - σβ:  (Optional) Noise for the gyro bias                       |  Scalar
+      - `J`:   Inertia matrix (as a Static Matrix)                      |  [3, 3]  (Static) 
+      - `x`:   STATE struct                                             |  STATE
+      - `u`:   control input (for rotation only)                        |  [3,]    (Static)
+      - `t`:   Current time (as an epoch)                               |  Epoch
+      - `Rₑ`:  (Optional) Radius of the Earth (default is meters)       |  Scalar
+      - `σβ`:  (Optional) Noise for the gyro bias                       |  Scalar
 
     Returns:
       - x:   updated STATE struct                                     |  STATE
@@ -132,7 +134,7 @@ function rk4(J::SMatrix{3, 3, T, 9}, x::STATE{T}, u::SVector{3, T}, t::Epoch, h:
     k₁ = h * dynamics(J, x, u, t; kwargs...)
     k₂ = h * dynamics(J, x + k₁/2, u, t + h/2; kwargs...)
     k₃ = h * dynamics(J, x + k₂/2, u, t + h/2; kwargs...)
-    k₄ = h * dynamics(J, x + k₃,   u, t + h; kwargs...)
+    k₄ = h * dynamics(J, x + k₃,  u, t + h; kwargs...)
 
     return CustomStructs.normalize_quat(x + (1/6) * (k₁ + 2 * k₂ + 2 * k₃ + k₄) )
 end

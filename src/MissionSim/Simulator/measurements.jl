@@ -26,40 +26,40 @@
       Optional arguments provide the ability to control the noise values for each sensor. 
 
     Arguments:
-      - sat:  (True) SATELLITE struct, which is used to generate sensor measurements     |  SATELLITE
+      - `sat`:  (True) SATELLITE struct, which is used to generate sensor measurements     |  SATELLITE
                     (J  //  magnetometer  //  diodes)
-      - alb:  struct containing REFL data and cell centers                               |  ALBEDO
+      - `alb`:  struct containing REFL data and cell centers                               |  ALBEDO
                     (REFL  //  cell_centers_ecef)
-      - x:    struct containing current environment state                                |  STATE 
+      - `x`:    struct containing current environment state                                |  STATE 
                     (r  //  v  //  q  //  ω  //  β)
-      - t:    Current time, as an epoch                                                  |  Epoch
-      - dt:   Time step                                                                  |  Scalar 
+      - `t`:    Current time, as an epoch                                                  |  Epoch
+      - `dt`:   Time step                                                                  |  Scalar 
 
-      - E_am₀:  (Opt) Irradiance of sunlight (TSI - visible & infrared). Default is 1366.0 W/m²     |  Scalar
-      - σB:     (Opt) stdev of noise used when generating the mag vector in body frame, in radians  |  Scalar
-      - σ_gyro_scale: (Opt) Scale that modifies ||gyro|| to get the stdev of the gyro noise         |  Scalar
-      - σr:     (Opt) stdev of noise used when generating the position measurement, in m            |  Scalar 
-      - σ_current_scale: (Opt) Scale that modifies ||diode current|| to get stdev of diode noise    |  Scalar 
+      - `E_am₀`:  (Opt) Irradiance of sunlight (TSI - visible & infrared). Default is 1366.0 W/m²     |  Scalar
+      - `σB`:     (Opt) stdev of noise used when generating the mag vector in body frame, in radians  |  Scalar
+      - `σ_gyro_scale`: (Opt) Scale that modifies ||gyro|| to get the stdev of the gyro noise         |  Scalar
+      - `σr`:     (Opt) stdev of noise used when generating the position measurement, in m            |  Scalar 
+      - `σ_current_scale`: (Opt) Scale that modifies ||diode current|| to get stdev of diode noise    |  Scalar 
 
     Returns:
-      - truth:    Struct containing noise-free values, used for evaluation and debugging   |  GROUND_TRUTH 
-      - sensors:  Struct containing noisy sensor "measurements" to be used in the MEKF     |  SENSORS
-      - ecl:      Eclipse factor (1.0 = full sun, 0.0 = full eclipse)                      |  Scalar
-      - noise:    Struct containing the noise used in the sensor. Used for debugging       |  NOISE
+      - `truth`:    Struct containing noise-free values, used for evaluation and debugging   |  GROUND_TRUTH 
+      - `sensors`:  Struct containing noisy sensor "measurements" to be used in the MEKF     |  SENSORS
+      - `ecl`:      Eclipse factor (1.0 = full sun, 0.0 = full eclipse)                      |  Scalar
+      - `noise`:    Struct containing the noise used in the sensor. Used for debugging       |  NOISE
 
 """
 function generate_measurements(sat::SATELLITE, alb::ALBEDO, x::STATE, t::Epoch, dt::T; 
-             E_am₀ = 1366.9, σB = deg2rad(3.0), σ_gyro_scale = 0.005, 
-             σr = 5e3, σ_current_scale = 0.05) where {T}
+             E_am₀ = 1366.9, σB = deg2rad(2.0), σ_gyro_scale = 0.005, 
+             σr = 5e3, σ_current_scale = 0.05, use_albedo = true) where {T}
 
-    ᴮQᴵ = quat2rot(x.q)  # Compute once and pass in 
+    ᴮQᴵ = quat2rot(x.q)'  # Compute once and pass in 
 
     # Call each sensor
-    Bᴵ, Bᴮ, B̃ᴮ  = mag_measurement(sat, x, ᴮQᴵ, t, dt; σ = σB) 
+    Bᴵ, Bᴮ, B̃ᴮ  = mag_measurement( sat, x, ᴮQᴵ, t, dt; σ = σB) 
     w, w̃, ηw    = gyro_measurement(x; σ_scale = σ_gyro_scale) 
-    r, r̃, ηr    = pos_measurement(x; σ = σr) 
-    sᴵ, sᴮ, ecl = sun_measurement(x, ᴮQᴵ, t)
-    I, Ĩ, ηI    = diode_measurement(sat, alb, x, ecl, sᴵ, sᴮ; σ_scale = σ_current_scale, E_am₀ = E_am₀)
+    r, r̃, ηr    = pos_measurement( x; σ = σr) 
+    sᴵ, sᴮ, ecl = sun_measurement( x, ᴮQᴵ, t)
+    I, Ĩ, ηI    = diode_measurement(sat, alb, x, ecl, sᴵ, sᴮ; σ_scale = σ_current_scale, E_am₀ = E_am₀, use_albedo = use_albedo)
 
     # Store the outputs 
     sensors = SENSORS(B̃ᴮ, Ĩ, w̃, r̃)
@@ -75,20 +75,20 @@ end
     matrix to generate the measured body vector.
 
     Arguments:
-      - sat: (True) SATELLITE struct, which is used to generate sensor measurements     |  SATELLITE
+      - `sat`: (True) SATELLITE struct, which is used to generate sensor measurements     |  SATELLITE
                       (J  //  magnetometer  //  diodes)
-      - x:   struct containing current environment state                                |  STATE 
+      - `x`:   struct containing current environment state                                |  STATE 
                       (r  //  v  //  q  //  ω  //  β)
-      - ᴮQᴵ: Rotation matrix from the inertial to the body frame                        |  [3, 3]  (Static)
-      - t:   Current time, as an epoch                                                  |  Epoch
-      - dt:  Time step                                                                  |  Scalar 
-      - σ:   (Opt) stdev of noise used when generating the measured mag vector          |  Scalar
+      - `ᴮQᴵ`: Rotation matrix from the inertial to the body frame                        |  [3, 3]  (Static)
+      - `t`:   Current time, as an epoch                                                  |  Epoch
+      - `dt`:  Time step                                                                  |  Scalar 
+      - `σ`:   (Opt) stdev of noise used when generating the measured mag vector          |  Scalar
                 in body frame, in radians ('σB' in generate_measurements)
  
     Returns:
-      - Bᴵ: Magnetic field vector in inertial frame (noiseless)                               | [3,] (SVector)
-      - Bᴮ: Magnetic field vector in body frame (noiseless)                                   | [3,] (SVector)
-      - B̃ᴮ: Measured magnetic field vector in body frame (noisy, biased, and un-calibrated)   | [3,] (SVector)
+      - `Bᴵ`: Magnetic field vector in inertial frame (noiseless)                               | [3,] (SVector)
+      - `Bᴮ`: Magnetic field vector in body frame (noiseless)                                   | [3,] (SVector)
+      - `B̃ᴮ`: Measured magnetic field vector in body frame (noisy, biased, and un-calibrated)   | [3,] (SVector)
 """
 function mag_measurement(sat::SATELLITE, x::STATE, ᴮQᴵ::SMatrix{3, 3, T, 9}, t::Epoch, dt::T; σ = deg2rad(3.0)) where {T}
 
@@ -98,7 +98,7 @@ function mag_measurement(sat::SATELLITE, x::STATE, ᴮQᴵ::SMatrix{3, 3, T, 9},
     # Add in noise
     η_mag = rotation_noise(σ, dt)
     mag_calibration_matrix = get_mag_calibration_matrix(sat)
-    B̃ᴮ = (mag_calibration_matrix * η_mag * Bᴮ) + sat.magnetometer.bias 
+    B̃ᴮ = (η_mag * mag_calibration_matrix * Bᴮ) + sat.magnetometer.bias 
 
     return Bᴵ, Bᴮ, B̃ᴮ
 end
@@ -173,11 +173,11 @@ end
 """
 function sun_measurement(x::STATE, ᴮQᴵ::SMatrix{3, 3, T, 9}, t::Epoch)::Tuple{SVector{3, T}, SVector{3, T}, T} where {T} 
 
-    sᴵₑ = (sun_position(t))  # Earth-Sun vector in inertial frame
-    sᴵ = sᴵₑ - x.r           # Satellite-Sun vector in inertial frame 
+    sᴵₑ = (sun_position(t))   # Earth-Sun vector in inertial frame
+    sᴵ  = sᴵₑ - x.r           # Satellite-Sun vector in inertial frame 
 
     ecl = eclipse_cylindrical(vcat([x.r;]...), sᴵₑ)
-    sᴮ = ᴮQᴵ * (sᴵ / norm(sᴵ))  # Make it unit
+    sᴮ  = ᴮQᴵ * (sᴵ / norm(sᴵ))  # Make it unit
     
     return sᴵ, sᴮ, ecl
 end
@@ -208,7 +208,7 @@ end
               (Note that this is really just tracked for debugging purposes)
 """  
 function diode_measurement(sat::SATELLITE{N, T}, alb::ALBEDO, x::STATE{T}, ecl::Real, sᴵ::SVector{3, T}, sᴮ::SVector{3, T}; 
-                            σ_scale = 0.05, E_am₀ = 1366.9)::Tuple{SVector{N, T}, SVector{N, T}, SVector{N, T}} where {N, T}
+                            σ_scale = 0.05, E_am₀ = 1366.9, use_albedo = true)::Tuple{SVector{N, T}, SVector{N, T}, SVector{N, T}} where {N, T}
 
     if (ecl == 0)   # No need to waste time calculating in eclipse - I = 0, Ĩ is just noise
         η = SVector{N, T}(rand(Normal(0.0, σ_scale * 0.001), N))
@@ -227,7 +227,7 @@ function diode_measurement(sat::SATELLITE{N, T}, alb::ALBEDO, x::STATE{T}, ecl::
             # Get photodiode surface normal
             surface_normal = SVector{3, T}((cos(ϵ[i])*cos(α[i])), (cos(ϵ[i])*sin(α[i])), sin(ϵ[i]))   
 
-            diode_albedo = compute_diode_albedo(albedo_matrix, alb.cell_centers_ecef, surface_normal, x.r)  
+            diode_albedo = (use_albedo) ? compute_diode_albedo(albedo_matrix, alb.cell_centers_ecef, surface_normal, x.r) : 0.0
 
             # Calculate current, including noise and Earth's albedo 
             current = C[i] * dot(surface_normal, sᴮ) + (C[i] / E_am₀) * diode_albedo  

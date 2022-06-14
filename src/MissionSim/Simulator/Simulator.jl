@@ -12,7 +12,8 @@ using LinearAlgebra, StaticArrays
 using EarthAlbedo, SatelliteDynamics 
 using Distributions, Plots
 
-include("../CustomStructs.jl"); using .CustomStructs 
+# include("../CustomStructs.jl"); using .CustomStructs 
+using ..CustomStructs
 include("../quaternions.jl")
 include("dynamics.jl")
 include("measurements.jl")
