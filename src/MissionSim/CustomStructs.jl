@@ -5,13 +5,21 @@ module CustomStructs
  - Add in plots, magnetometer noise to the 'NOISE' struct...?
  - Alphabetize? Organize somehow (in separate files?)
  - flags
+
+ - SATELLITE has diodes in SAT_STATE && in DIODES and that can be way problematic (make 'diodes' a function call that pulls from state?)
+ - SAT_STATE and DIODES both have the C, α, ϵ -> remove from sat_state
+
+
+ try reduce(hcat, v) instead of (hcat([v;]...)) in plotting!
 """
 
 using EarthAlbedo
-# include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo 
 using SatelliteDynamics
 using StaticArrays, Distributions, LinearAlgebra
 using Plots
+
+# include("/home/benjj/.julia/dev/EarthAlbedo.jl/src/EarthAlbedo.jl");  using .EarthAlbedo 
+using Infiltrator
 
 export MAGNETOMETER, DIODES, SATELLITE, SENSORS, ALBEDO, GROUND_TRUTH, ESTIMATES, TRIVIAL, FLAGS, NOISE, STATE
 export SAT_STATE, SAT_COVARIANCE
@@ -54,14 +62,14 @@ struct MAGNETOMETER{T}
             b   = SVector{3, Float64}(zeros(3))  # No Bias
             return MAGNETOMETER(sf, noa, b);
         else # Make a noisy one
-            sf  = 1.0 .+ 0.2 * rand(3) 
-            noa = 0.2 * rand(3) 
-            b   = 0.25 * rand(3)
+            sf  = rand(Normal(1.0, 0.1), 3) 
+            noa = rand(Normal(0.0, deg2rad(3.0)), 3) 
+            b   = rand(Normal(0.0, deg2rad(4.0)), 3)
             return MAGNETOMETER(SVector{3, Float64}(sf), SVector{3, Float64}(noa), SVector{3, Float64}(b))
         end
     end
 end
-Base.deepcopy(s::MAGNETOMETER) = MAGNETOMETER(deepcopy(s.scale_factors), deepcopy(s.non_ortho_angles), deepcopy(s.bias)) #, deepcopy(s.induced_scale_factors))
+# Base.deepcopy(s::MAGNETOMETER) = MAGNETOMETER(deepcopy(s.scale_factors), deepcopy(s.non_ortho_angles), deepcopy(s.bias))
 
 
 
@@ -85,6 +93,19 @@ struct DIODES{S, T}
     elev_angles::SVector{S, T}        #   Elevation angle for each photodiode surface normal
 
     function DIODES(cv::SVector{S, T}, aa::SVector{S, T}, ea::SVector{S, T}) where {S, T}
+
+        # Wrap α ∈ (-pi, pi] and ϵ ∈ (-pi/2, pi/2]
+        if any(ea .≤ -pi/2) || any(ea .> pi/2)
+            # Convert to cartesian, and convert back to stay in range
+
+            x, y, z = sph2cart(aa, ea)
+            aa, ea = cart2sph(x, y, z)
+            aa = SVector{S, T}(aa)
+            ea = SVector{S, T}(ea)
+        elseif any(aa .≤ -pi) || any(aa .> pi)
+            aa = wrap(aa)
+        end
+        
         """ Primary Constructor """
         new{S, T}(cv, aa, ea)
     end
@@ -108,34 +129,70 @@ struct DIODES{S, T}
 
         if ideal 
             cv = ones(6)
-            # ea = [(-pi/4); (pi/4);  0.0;    0.0;    (pi/4); (-pi/4)] 
-            # aa = [0.0;      pi;     (pi/2); (-pi/2); 0.0;    pi]  
-            ea = []
-
-            aa = [0.0,  pi, pi/2, -pi/2,  0.0,   0.0]
-            ea = [0.0, 0.0,  0.0,   0.0, pi/2, -pi/2]
-
-            return DIODES(SVector{N, Float64}(cv), SVector{N, Float64}(ea), SVector{N, Float64}(aa))
-        end
-
-        cv = 1.0 .+ 0.15 * rand(N) 
-
-        if N == 6
             ea = [(-pi/4); (pi/4);  0.0;    0.0;    (pi/4); (-pi/4)] 
             aa = [0.0;      pi;     (pi/2); (-pi/2); 0.0;    pi]  
-            ea = ea + rand(Normal(0.0, deg2rad(5.0)), N)
-            aa = aa + rand(Normal(0.0, deg2rad(5.0)), N)
+
+            # 
+            # aa = [0.0,  pi, pi/2, -pi/2,  0.0,   0.0]
+            # ea = [0.0, 0.0,  0.0,   0.0, pi/2, -pi/2]
+
+            return DIODES(SVector{N, Float64}(cv), SVector{N, Float64}(aa), SVector{N, Float64}(ea))
+        end
+
+        cv = rand(Normal(1.0, 0.1), N)  
+
+        if N == 6
+            aa = [0.0;        pi;   (pi/2); (-pi/2);      0.0;      pi]  
+            ea = [(-pi/4); (pi/4);     0.0;     0.0;   (pi/4); (-pi/4)] 
+
+
+            # aa = [0.0,  pi, pi/2, -pi/2,  0.0,   0.0]
+            # ea = [0.0, 0.0,  0.0,   0.0, pi/2, -pi/2]
+
+            ea = ea + rand(Normal(0.0, deg2rad(3.0)), N)
+            aa = aa + rand(Normal(0.0, deg2rad(3.0)), N)
         else
             ea = deg2rad.(rand(-90:90, N))
             aa = deg2rad.(rand(-179:180, N))
         end
 
-        return DIODES(SVector{N, Float64}(cv), SVector{N, Float64}(ea), SVector{N, Float64}(aa))
+        return DIODES(SVector{N, Float64}(cv), SVector{N, Float64}(aa), SVector{N, Float64}(ea))
     end
 end
-Base.deepcopy(s::DIODES) = DIODES(deepcopy(s.calib_values), deepcopy(s.azi_angles), deepcopy(s.elev_angles))
+# Base.deepcopy(s::DIODES) = DIODES(deepcopy(s.calib_values), deepcopy(s.azi_angles), deepcopy(s.elev_angles))
+# Base.deepcopy_internal(s::DIODES, dict::IdDict) = DIODES(deepcopy(s.calib_values), deepcopy(s.azi_angles), deepcopy(s.elev_angles))
 
 
+function wrap(a::SVector{N, T}) where {N, T}
+    v = zeros(T, N)
+    for i = 1:N
+        aᵢ = a[i]
+        while aᵢ > pi
+            aᵢ -= (2 * pi)
+        end 
+        while aᵢ ≤ -pi 
+            aᵢ += (2 * pi)
+        end
+        v[i] = aᵢ
+    end
+
+    return SVector{N, T}(v)
+end
+
+function sph2cart(α, ϵ)
+    θ = (pi/2) .- ϵ  # Convert to from elevation to inclination or whatever
+    x = cos.(α) .* sin.(θ)
+    y = sin.(α) .* sin.(θ)
+    z = cos.(θ)
+    return x, y, z
+end
+
+function cart2sph(x, y, z)
+    α = atan.(y, x)
+    θ = atan.(sqrt.( (x.^2) .+ (y.^2)), z)  # Assumes unit 
+    ϵ = pi/2 .- θ
+    return α, ϵ
+end
 
 
 
@@ -152,19 +209,21 @@ Base.deepcopy(s::DIODES) = DIODES(deepcopy(s.calib_values), deepcopy(s.azi_angle
     diode calibration parameters: Calibration value 'C', and the azimuth 'α' and elevation 'ϵ' angles 
     for the surface normals of each diode.
 """
-struct SAT_STATE{N, T}
+struct SAT_STATE{T}
     q::SVector{4, T}     # Scalar-first unit quaternion representing orientation of the satellite 
     β::SVector{3, T}     # Gyroscope bias 
-    C::SVector{N, T}     # Current scale factor for each diode 
-    α::SVector{N, T}     # Azimuth angle corresponding to each diode 
-    ϵ::SVector{N, T}     # Elevation angle corresponding to each diode 
+    # C::SVector{N, T}     # Current scale factor for each diode 
+    # α::SVector{N, T}     # Azimuth angle corresponding to each diode 
+    # ϵ::SVector{N, T}     # Elevation angle corresponding to each diode 
 
-    function SAT_STATE(q::SVector{4, T}, β::SVector{3, T}, C::SVector{N, T}, α::SVector{N, T}, ϵ::SVector{N, T}) where {N, T}
+    function SAT_STATE(q::SVector{4, T}, β::SVector{3, T}) where {T}
         """ Primary Constructor """
-        new{N, T}(q, β, C, α, ϵ)
+
+        q = (norm(q) == 1) ? q  : (q / norm(q))
+        new{T}(q, β)
     end
 
-    function SAT_STATE(; q = nothing, β = nothing, C = nothing, α = nothing, ϵ = nothing, N = 6, ideal = false)
+    function SAT_STATE(; q = nothing, β = nothing, ideal = false)
         """ Randomly generate either a noisy or ideal satellite state """
 
         function rand_quat()
@@ -174,31 +233,20 @@ struct SAT_STATE{N, T}
 
         if ideal  # No rotation, no bias, unit scale factors, and perfect 
 
-            if N != 6 
-                @warn "Don't know how to make an ideal state if N != 6!"
-            end
-
             _q = SVector{4, Float64}(1.0, 0, 0, 0)
             _β = SVector{3, Float64}(0.0, 0.0, 0.0)
-            _C = SVector{6, Float64}(ones(N))
-            _α = SVector{6, Float64}(0.0, deg2rad(180), deg2rad(90), deg2rad(-90), 0.0, 0.0)
-            _ϵ = SVector{6, Float64}(0.0, 0.0, 0.0, 0.0, deg2rad(90), deg2rad(-90))
 
-            return SAT_STATE(_q, _β, _C, _α, _ϵ)
+            return SAT_STATE(_q, _β)
         else
 
             _q = isnothing(q)  ?  rand_quat()  :  q 
             _β = isnothing(β)  ?  randn(3)     :  β 
-            _C = isnothing(C)  ?  1.0 .+ 0.1 * randn(N)  :  C 
-            _α = isnothing(α)  ?  deg2rad.(rand(0:359, N))  :  α 
-            _ϵ = isnothing(ϵ)  ?  deg2rad.(rand(0:179, N))  : ϵ
     
-            return SAT_STATE(SVector{4, Float64}(_q),  SVector{3, Float64}(_β),  SVector{N, Float64}(_C),
-                                SVector{N, Float64}(_α),  SVector{N, Float64}(_ϵ))
+            return SAT_STATE(SVector{4, Float64}(_q),  SVector{3, Float64}(_β))
         end
     end
 end
-Base.deepcopy(ss::SAT_STATE) = SAT_STATE(; q = deepcopy(ss.q), β = deepcopy(ss.β), C = deepcopy(ss.C), α = deepcopy(ss.α), ϵ = deepcopy(ss.ϵ))
+# Base.deepcopy(ss::SAT_STATE) = SAT_STATE(; q = deepcopy(ss.q), β = deepcopy(ss.β))
 
 """
     update_state(x; q, β, C, α, ϵ)
@@ -206,15 +254,14 @@ Base.deepcopy(ss::SAT_STATE) = SAT_STATE(; q = deepcopy(ss.q), β = deepcopy(ss.
       'Updates' portions of a SAT_STATE struct by creating a new struct 
     and copying relevant stuff over. 
 """
-function update_state(x::SAT_STATE{N, T}; q = nothing, β = nothing, C = nothing, α = nothing, ϵ = nothing) where {N, T}
+function update_state(x::SAT_STATE{T}; q = nothing, β = nothing) where {N, T}
 
-    _q = isnothing(q) ? copy(x.q) : q 
-    _β = isnothing(β) ? copy(x.β) : β
-    _C = isnothing(C) ? copy(x.C) : C
-    _α = isnothing(α) ? copy(x.α) : α
-    _ϵ = isnothing(ϵ) ? copy(x.ϵ) : ϵ
+    _q = isnothing(q) ? Array(x.q)  : Array(q) 
+    _β = isnothing(β) ? Array(x.β)  : Array(β)
+    # _q = isnothing(q) ? deepcopy( SVector{4, T}(vcat([x.q;]...))) : q 
+    # _β = isnothing(β) ? SVector{3, T}(deepcopy(vcat([x.β;]...))) : SVector{3, T}(deepcopy(vcat([β;]...)))
 
-    return SAT_STATE(_q, _β, _C, _α, _ϵ)
+    return SAT_STATE(SVector{4, T}(_q), SVector{3, T}(_β))
 end
 
 
@@ -313,17 +360,17 @@ struct SATELLITE{S, T}
     J::SMatrix{3, 3, T, 9}               # Inertia Matrix of satellite  
     magnetometer::MAGNETOMETER{T}        # Mag calibration values      
     diodes::DIODES{S, T}                 # Diode calibration values 
-    state::SAT_STATE{S, T}               # Satellite state 
+    state::SAT_STATE{T}                  # Satellite state 
     covariance::Matrix{T}                # Satellite state covariance 
 
     function SATELLITE(J::SMatrix{3, 3, T, 9}, mag::MAGNETOMETER{T}, dio::DIODES{S, T}, 
-                        sta::SAT_STATE{S, T}, cov::Matrix{T})  where {S, T}
-        """ Primary Constructor """
-        new{S, T}(J, mag, dio, sta, cov)
+                        sta::SAT_STATE{T}, cov::Matrix{T})  where {S, T}
+        """ Primary Constructor -> fixes problem with === errors -> ACTUALLY IT DOESNT  """
+        new{S, T}(SMatrix{3, 3, T, 9}(J), mag, dio, sta, cov)
     end
 
     function SATELLITE(; J = nothing, mag::MAGNETOMETER{T} = MAGNETOMETER(), dio::DIODES = DIODES(), 
-                            sta::SAT_STATE = SAT_STATE(; N = 6), cov::Matrix{T} = SAT_COVARIANCE().Σ, ideal::Bool = false) where {T}
+                            sta::SAT_STATE = SAT_STATE(), cov::Matrix{T} = SAT_COVARIANCE().Σ, ideal::Bool = false) where {T}
         """ Random SATELLITE """
 
         if ideal 
@@ -331,7 +378,7 @@ struct SATELLITE{S, T}
             _mag = MAGNETOMETER(; ideal = true)
             _dio = DIODES(; ideal = true)
             _sta = SAT_STATE(; ideal = true)
-            _cov = I(24)  # 6 + 3 * (N = 6)
+            _cov = Matrix(1.0 * I(24))  # 6 + 3 * (N = 6)
 
             return SATELLITE(_J, _mag, _dio, _sta, _cov)
         end
@@ -353,7 +400,7 @@ struct SATELLITE{S, T}
     end
 
 end
-Base.deepcopy(s::SATELLITE) = SATELLITE(deepcopy(s.J), deepcopy(s.magnetometer), deepcopy(s.diodes), deepcopy(s.state), deepcopy(s.covariance))
+# Base.deepcopy(s::SATELLITE) = SATELLITE(deepcopy(s.J), deepcopy(s.magnetometer), deepcopy(s.diodes), deepcopy(s.state), deepcopy(s.covariance))
 
 
 
@@ -465,16 +512,16 @@ struct GROUND_TRUTH{N, T}
     Bᴮ::SVector{3, T}               # Magnetic field vector in body frame
     I::SVector{N, T}                # Diode currents 
 end
-function RecipesBase.plot(gt::Vector{GROUND_TRUTH}; split = false, kwargs...)
+function RecipesBase.plot(gt::Vector{GROUND_TRUTH{6, T}}; ds = 1, split = false, kwargs...) where {T}
     N = size(gt, 1)
-    ts  = [gt[i].t - gt[1].t for i = 1:N];  # Convert to seconds 
+    ts  = [gt[i].t - gt[1].t for i = 1:ds:N];  # Convert to seconds 
     
     # Split apart and format as matrices for plotting
-    Bᴵs = [gt[i].Bᴵ for i = 1:N]; Bᴵs = hcat(Bᴵs...)';
-    sᴵs = [gt[i].sᴵ for i = 1:N]; sᴵs = hcat(sᴵs...)';
-    ŝᴮs = [gt[i].ŝᴮ for i = 1:N]; ŝᴮs = hcat(ŝᴮs...)';
-    Bᴮs = [gt[i].Bᴮ for i = 1:N]; Bᴮs = hcat(Bᴮs...)';
-    Is  = [gt[i].I  for i = 1:N]; Is  = hcat(Is... )';
+    Bᴵs = [gt[i].Bᴵ for i = 1:ds:N]; Bᴵs = hcat(Bᴵs...)';
+    sᴵs = [gt[i].sᴵ for i = 1:ds:N]; sᴵs = hcat(sᴵs...)';
+    ŝᴮs = [gt[i].ŝᴮ for i = 1:ds:N]; ŝᴮs = hcat(ŝᴮs...)';
+    Bᴮs = [gt[i].Bᴮ for i = 1:ds:N]; Bᴮs = hcat(Bᴮs...)';
+    Is  = [gt[i].I  for i = 1:ds:N]; Is  = hcat(Is... )';
 
     # Generate plots
     pBᴵ = plot(ts, Bᴵs, title = "Inertial Mag Vec (Bᴵ)", xlabel = "Time (s)", ylabel = "Strength (μT)",  label = ["x" "y" "z"]; kwargs...)
@@ -520,6 +567,8 @@ struct STATE{T}
 
     function STATE(r::SVector{3, T}, v::SVector{3, T}, q::SVector{4, T}, ω::SVector{3, T}, β::SVector{3, T}) where {T} 
         """ Primary Constructor """
+
+        # q = (norm(q) == 1) ? q  : (q / norm(q))  # Enforce unit norm constraint
         new{T}(r, v, q, ω, β)
     end
 
@@ -561,20 +610,22 @@ function x(s::STATE{T}) where {T}
 end
 
 #NOT efficient, but whatever
-function RecipesBase.plot(s::Vector{STATE{T}}; split = false, kwargs...) where {T}
+function RecipesBase.plot(s::Vector{STATE{T}}; ds = 1, split = false, kwargs...) where {T}
     N = size(s, 1)
 
     # Split apart and format as matrices for plotting
-    rs = [vcat([s[i].r;]...) for i = 1:N]; rs = hcat(rs...)';
-    vs = [vcat([s[i].v;]...) for i = 1:N]; vs = hcat(vs...)';
-    qs = [vcat([s[i].q;]...) for i = 1:N]; qs = hcat(qs...)';  # THIS LINE CAUSES WEIRD ERRORS
-    ωs = [vcat([s[i].ω;]...) for i = 1:N]; ωs = hcat(ωs...)';
-    βs = [vcat([s[i].β;]...) for i = 1:N]; βs = hcat(βs...)';
+    rs = [vcat([s[i].r;]...) for i = 1:ds:N]; rs = hcat(rs...)';
+    vs = [vcat([s[i].v;]...) for i = 1:ds:N]; vs = hcat(vs...)';
+    qs = [vcat([s[i].q;]...) for i = 1:ds:N]; qs = hcat(qs...)';  
+    ωs = [vcat([s[i].ω;]...) for i = 1:ds:N]; ωs = hcat(ωs...)';
+    mag_ω = [norm(s[i].ω) for i = 1:ds:N]
+    βs = [vcat([s[i].β;]...) for i = 1:ds:N]; βs = hcat(βs...)';
 
     pr = plot(rs, title = "Position (Cart)", xlabel = "Index", ylabel = "Position (m)",    label = ["x" "y" "z"]; kwargs...)
     pv = plot(vs, title = "Velocity",        xlabel = "Index", ylabel = "Velocity (m/s)",  label = ["x" "y" "z"]; kwargs...)
     pq = plot(qs, title = "Attitude (quat)", xlabel = "Index",                             label = ["x" "y" "z"]; kwargs...)
-    pω = plot(ωs, title = "Ang Velocity",    xlabel = "Index", ylabel = "Ang Vel (rad/s)", label = ["x" "y" "z"]; kwargs...)
+    pω = plot(ωs, title = "Ang Velocity",    xlabel = "Index", ylabel = "Ang Vel (rad/s)", label = ["x" "y" "z"]; kwargs...);
+        pω = plot!(mag_ω, label = "||ω||", c = :black, ls = :dash)
     pβ = plot(βs, title = "Gyro Bias",       xlabel = "Index", ylabel = "Bias (rad/s)",    label = ["x" "y" "z"]; kwargs...)
     p   = plot()
 
@@ -634,11 +685,15 @@ end
                                 #                                 FLAGS                                  # 
                                 ##########################################################################
 mutable struct FLAGS
-    in_sun::Bool 
+    init_detumble::Bool 
     magnetometer_calibrated::Bool
     diodes_calibrated::Bool
-    detumbling::Bool
-    calibrating::Bool
+    final_detumble::Bool 
+    in_sun::Bool 
+
+    function FLAGS(; in_sun = false, mag_cal = false, dio_cal = false, init_detumble = false, final_detumble = false)
+        new(init_detumble, mag_cal, dio_cal, final_detumble, in_sun)
+    end
 end
 
 end # Module
