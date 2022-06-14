@@ -219,7 +219,7 @@ function current_measurement(x, c, α, ϵ, 𝐬ᴵ, i, pos, time, alb::ALBEDO)
     # ecl = eclipse_conical(-pos, sᴵ_unscaled) ####### NEED TO FIX TO +pos when updated
     # ecl = (ecl > 0.98) ? 1.0 : 0.0
 
-    albedo_matrix, ignore = albedo(pos, sᴵ_unscaled, alb.refl)
+    albedo_matrix = earth_albedo(SVector{3, Float64}(pos), SVector{3, Float64}(sᴵ_unscaled), alb.refl.data) # albedo(pos, sᴵ_unscaled, alb.refl)
 
     for j = 1:i
         surface_normal = [cos(ϵ[j])*cos(α[j]) cos(ϵ[j])*sin(α[j]) sin(ϵ[j])]     # Photodiode surface normal 

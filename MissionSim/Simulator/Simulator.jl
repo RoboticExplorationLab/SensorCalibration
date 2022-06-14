@@ -249,9 +249,9 @@ function generate_measurements(sim::SIM, sat::SATELLITE, alb::ALBEDO, x, t, CONS
 end
 
     # Specify ||η_mag||
-    function generate_magnetic_field(pos, time, sat, ᴮRᴵ, dt)
+    function generate_magnetic_field(pos, time, sat, ᴮRᴵ, dt; σ = deg2rad(2.0))
         Bᴵ = IGRF13(pos, time)  # Mag vector in inertial frame
-        η_mag = generate_noise_matrix(deg2rad(2.0), dt)
+        η_mag = generate_noise_matrix(σ, dt)
         Bᴮ = (ᴮRᴵ * (Bᴵ))       # Mag vector in body frame
 
         mag_calib_matrix = generate_mag_calib_matrix(sat)
@@ -294,7 +294,7 @@ end
     end
 
     # Added noise back in 
-    function generate_diode_currents(sat, pos, alb, sᴵ, 𝐬ᴮ, ecl, CONSTANTS)
+    function generate_diode_currents(sat, pos, alb, sᴵ, 𝐬ᴮ, ecl, CONSTANTS; σ = 0.05)
         C, α, ϵ = sat.diodes.calib_values, sat.diodes.azi_angles, sat.diodes.elev_angles 
 
         num_diodes =  size(sat.diodes.calib_values, 1)
@@ -312,7 +312,7 @@ end
             diode_albedo = compute_diode_albedo(albedo_matrix, alb.cell_centers_ecef, surface_normal, pos)
 
             current = (C[i] * surface_normal * 𝐬ᴮ) .+ (C[i] * diode_albedo / CONSTANTS._E_am0) # Calculate current, including noise and Earth's albedo 
-            current_noise = rand(Normal(0.0, abs((0.05 * current[1]))))
+            current_noise = rand(Normal(0.0, abs((σ * current[1]))))
 
             current_meas[i] = (current .+ current_noise)[1] * ecl
             current_vals[i] = current[1] * ecl 
