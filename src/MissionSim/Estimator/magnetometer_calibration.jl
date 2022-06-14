@@ -6,10 +6,12 @@
 
     - Adjust main so this is only called when data is full
     - Remove the check that ensures the angles are right
-    - Do I actually 𝑤𝑎𝑛𝑡 to force them all to call/return the same way? Returning data is useless
     - Gauss-Newton is pretty slow but is run only once, so...
     (None of this section needs to be fast, except maybe update!)
-    - Do we actually 𝑛𝑒𝑒𝑑 nonlinear least squares...? The relation between meas and pred is affine ya?
+
+    Try using just [1,1,1 0,0,0 0,0,0] as initial guess?
+
+    - Because we are just using mag, we are really just passing in Bᴵ_exp as Bᴮ_exp -> verify and update comments 
 """
 
 
@@ -69,6 +71,10 @@ struct MAG_CALIBRATOR{T}
 
         new{T}(A, B_meas, B_pred, N, idx)
     end
+
+    function MAG_CALIBRATOR(N, bm::SVector{3, T}, bp::Vector{T}) where {T} 
+        return MAG_CALIBRATOR(N, vcat([bm;]...), bp);
+    end
 end
 
 """
@@ -81,12 +87,12 @@ end
     Throws a warning if the matrices have already been filled
     
     Arguments:
-      - mag_cal:  Struct containing the matrices to be updated         |  MAG_CALIBRATOR
-      - bm:       Measured B-vector to be added to mag_cal             |  [3,]
-      - bp:       Predicted B-vector to be added to mag_cal            |  [3,]
+      - `mag_cal`:  Struct containing the matrices to be updated         |  MAG_CALIBRATOR
+      - `bm`:       Measured B-vector to be added to mag_cal             |  [3,]
+      - `bp`:       Predicted B-vector to be added to mag_cal            |  [3,]
 
     Returns:
-      - idx:      Index of newly added sample in the mag_cal struct    |  Int
+      - `idx`:      Index of newly added sample in the mag_cal struct    |  Int
 """
 function update!(mag_cal::MAG_CALIBRATOR{T}, bm::Vector{T}, bp::Vector{T}) where {T} 
 
@@ -120,6 +126,11 @@ function update!(mag_cal::MAG_CALIBRATOR{T}, bm::Vector{T}, bp::Vector{T}) where
     mag_cal.idx[1] += 1 # This line is why idx needs to be a vector in the immutable struct 
 end
 
+# Version that allows for static measured - probably can remove
+function update!(mag_cal::MAG_CALIBRATOR{T}, bm::SVector{3, T}, bp::Vector{T}) where {T} 
+    update!(mag_cal, vcat([bm;]...), bp)
+end
+
 
 """
     estimate(sat, data)
@@ -140,10 +151,13 @@ end
         -> Check out initial commit for version with currents included (or the separate folder has it in the past, too)
 
     Arguments:
-      - sat:  Satellite struct that is updated (by copying) with the estimated         |  SATELLITE
+      - `sat`:  Satellite struct that is updated (by copying) with the estimated         |  SATELLITE
                    magnetometer calibration values 
-      - data: Struct containing the measured and predicted magnetic field              |  MAG_CALIBRATOR
+      - `data`: Struct containing the measured and predicted magnetic field              |  MAG_CALIBRATOR
                    vectors in body frame
+
+    Returns: 
+      - `sat_est`:  Updated satellite struct with new values                             |  SATELLITE
 """
 function estimate(sat::SATELLITE, data::MAG_CALIBRATOR{T}) where {T}
 
@@ -175,7 +189,7 @@ function estimate(sat::SATELLITE, data::MAG_CALIBRATOR{T}) where {T}
         # Because structs are immutable, we just make a new one and copy the relevant stuff over 
         sat_est = SATELLITE(; J = sat.J, mag = mag_est, dio = sat.diodes) 
 
-        return sat_est, data
+        return sat_est
     end
 end
 
@@ -193,11 +207,11 @@ end
     a line search to help speed up the process. 
 
     Arguments:
-      - x0:   Initial guess for the parameters to be estimated                       |  Vector ([9,] here)
-      - data: Measured and predicted mag vectors needed for the residual function    |  MAG_CALIBRATOR 
+      - `x0`:   Initial guess for the parameters to be estimated                       |  Vector ([9,] here)
+      - `data`: Measured and predicted mag vectors needed for the residual function    |  MAG_CALIBRATOR 
 
     Returns:
-      - x:  Final guess for the parameters to be estimated                           |  [9,]                
+      - `x`:  Final guess for the parameters to be estimated                           |  [9,]                
 """
 function gauss_newton(x0, data::MAG_CALIBRATOR{T}; max_iters = 50, ls_iters = 20) where {T}
 
