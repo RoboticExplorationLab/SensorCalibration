@@ -8,8 +8,7 @@
  - Read up on IMU stuff to get a fill for the noise W and V and general covariance stuff
  - Read up on setting initial covariances too
 
- - If i dont have the same function name, can I just drop these useless structs and pass in 
-      like sensors and thats it?
+ - unit for Bᴵ, Bᴮ, Ĩ, etc...?
 
  - comment
 
@@ -35,7 +34,7 @@ struct MEKF_DATA{T}
     end
 
     function MEKF_DATA(; N = 6, σ_sun = deg2rad(3.0), σ_mag = deg2rad(3.0),
-                            σC = 0.1, σα = deg2rad(3.), σϵ = deg2rad(3.),
+                            σC = 0.1, σα = deg2rad(3.), σϵ = deg2rad(3.),  # Was 0.1, 3, 3
                             gyro_bias_instability = 0.8,   # in deg/hour  
                             angle_random_walk     = 0.06)  # in deg/sqrt(hour)
 
@@ -104,14 +103,14 @@ end
     Note that this function should NOT be called during eclipses.
 
     Arguments:
-      - sat:    Struct containing current estimate of satellite values      |  SATELLITE
-      - sens:   Struct containing the most recent sensor measurements       |  SENSORS 
-      - noise:  Struct containing the noise matrices V, W (as Cholesky)     |  MEKF_DATA
-      - alb:    Struct containing the reflectivity data for Earth's Albedo  |  ALBEDO 
-      - t:      Current time, as an Epoch                                   |  Epoch 
-      - dt:     Size of each time step                                      |  Scalar
-      - use_albedo:  (Opt) Whether or not to factor in Earth's albedo  (defaults to 'true')     |  Bool 
-      - calibrate_diodes:  (Opt) Whether or not to update diode estimates (defaults to 'true')  |  Bool
+      - `sat`:    Struct containing current estimate of satellite values      |  SATELLITE
+      - `sens`:   Struct containing the most recent sensor measurements       |  SENSORS 
+      - `noise`:  Struct containing the noise matrices V, W (as Cholesky)     |  MEKF_DATA
+      - `alb`:    Struct containing the reflectivity data for Earth's Albedo  |  ALBEDO 
+      - `t`:      Current time, as an Epoch                                   |  Epoch 
+      - `dt`:     Size of each time step                                      |  Scalar
+      - `use_albedo`:  (Opt) Whether or not to factor in Earth's albedo  (defaults to 'true')     |  Bool 
+      - `calibrate_diodes`:  (Opt) Whether or not to update diode estimates (defaults to 'true')  |  Bool
 
     Returns:
         - sat:  Updated satellite struct containing new estimates           |  SATELLITE
@@ -130,14 +129,18 @@ function estimate(sat::SATELLITE{N, T}, sens::SENSORS{N, T}, noise::MEKF_DATA{T}
     # Pass into square-root MEKF 
     Pchol = (calibrate_diodes) ? sat.covariance : sat.covariance[1:6, 1:6]
     Wchol = (calibrate_diodes) ? noise.Wchol    : UpperTriangular(noise.Wchol[1:6, 1:6])
-    x⁺, Pchol⁺ = sqrt_mekf(sat.state, Pchol, alb, sens.gyro, Bᴵ_est, sᴵ_est,
+    x⁺, diodes⁺, Pchol⁺ = sqrt_mekf(sat.state, sat.diodes, Pchol, alb, sens.gyro, Bᴵ_est, sᴵ_est,
                              sens.magnetometer, sens.diodes, sens.pos, dt, Wchol, noise.Vchol; 
                              use_albedo = use_albedo, calibrate_diodes = calibrate_diodes)
 
 
     # Process result and update sat (by making a new copy)
-    sat⁺ = SATELLITE(; J = deepcopy(sat.J), dio = deepcopy(sat.diodes), mag = deepcopy(sat.magnetometer), cov = copy(sat.covariance), 
-                        sta = SAT_STATE(q = x⁺.q, β = x⁺.β, C = x⁺.C, α = x⁺.α, ϵ = x⁺.ϵ) )   
+
+    # 
+    sat⁺ = SATELLITE(deepcopy(sat.J), MAGNETOMETER(sat.magnetometer.scale_factors, sat.magnetometer.non_ortho_angles, sat.magnetometer.bias),
+                            diodes⁺, x⁺, copy(sat.covariance) )
+    # sat⁺ = SATELLITE(; J = deepcopy(sat.J), dio = deepcopy(sat.diodes), mag = deepcopy(sat.magnetometer), cov = copy(sat.covariance), 
+    #                     sta = SAT_STATE(q = x⁺.q, β = x⁺.β, C = x⁺.C, α = x⁺.α, ϵ = x⁺.ϵ) )   
     
     if calibrate_diodes 
         sat⁺.covariance .= Pchol⁺
@@ -154,27 +157,34 @@ end
 # Test on something real simple to see if it converges?
 # W and V are alreaady chol'd
 # ASSUMES SMALL ANGLE APPROXIMATION HOLDS, uses 3-param
+
+# Does having Bᴮ not be unit give it heavy weighting bias or is that taken care of with L?
 """
     sqrt_mekf(x, Pchol, alb, ω, Bᴵ, sᴵ, B̃ᴮ, Ĩ, pos, dt, W, V; E_am₀ = 1366.9, use_albedo = true, calibrate_diodes = true)
 
     
 """
-function sqrt_mekf(x::SAT_STATE{N, T}, Pchol::Matrix{T}, alb::ALBEDO, 
+function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb::ALBEDO, 
                    ω::SVector{3, T}, Bᴵ::SVector{3, T}, sᴵ::SVector{3, T}, B̃ᴮ::SVector{3, T}, 
                    Ĩ::SVector{N, T}, pos::SVector{3, T}, dt::T, W::UpperTriangular, V::UpperTriangular; 
                    E_am₀ = 1366.9, use_albedo = true, calibrate_diodes = true) where {N, T}
     
+
     # Prediction 
-    x_pred, A = prediction(x, ω, dt; calibrate_diodes = calibrate_diodes)
+    # x_pred, A = prediction(x, ᴵQᴮ * (ω - x.β) + x.β, dt, N; calibrate_diodes = false)
+    x_pred, A = prediction(x, ω, dt, N; calibrate_diodes = calibrate_diodes)
     Pchol_pred = qrᵣ([Pchol * A'; W])  # Update covariance (as Cholesky)
 
     # Measurement 
-    Bᴮ_exp, H_mag = mag_measurement(x_pred, Bᴵ; calibrate_diodes = calibrate_diodes)
-    I_exp,  H_cur = current_measurement(x_pred, sᴵ, pos, alb; E_am₀ = E_am₀,
+    Bᴮ_exp, H_mag = mag_measurement(x_pred, Bᴵ / norm(Bᴵ), N; calibrate_diodes = calibrate_diodes)
+    I_exp,  H_cur = current_measurement(x_pred, diodes, sᴵ, pos, alb; E_am₀ = E_am₀,
                                              use_albedo = use_albedo, calibrate_diodes = calibrate_diodes)
 
     # Innovation 
-    z = [B̃ᴮ - Bᴮ_exp; Ĩ - I_exp]
+    z = [(B̃ᴮ / norm(B̃ᴮ)) - Bᴮ_exp; (Ĩ / norm(Ĩ)) - I_exp]
+
+    H_mag *= 2 
+    H_cur[:, 1:3] *= 2
     H = [H_mag; H_cur]
 
     # Kalman Gain (how much we trust the measurement over the dynamics)
@@ -182,18 +192,34 @@ function sqrt_mekf(x::SAT_STATE{N, T}, Pchol::Matrix{T}, alb::ALBEDO,
     L = (((Pchol_pred' * Pchol_pred * H') / Pchol_yy) / Pchol_yy')
 
     # Update 
-    x⁺ = update(x_pred, L, z; calibrate_diodes = calibrate_diodes) 
+    x⁺, diodes⁺ = update(x_pred, diodes, L, z; calibrate_diodes = calibrate_diodes) 
     Pchol⁺ = qrᵣ([ Pchol_pred * (I - L * H)'; V * L']); 
 
     @debug (norm(Pchol) < norm(Pchol_pred)) && (norm(Pchol) > norm(Pchol⁺))  # Goes up with prediction, down with measurement
 
-    return x⁺, Pchol⁺
+    # #### REMOVE ! 
+    # θ_err = acos( (Bᴮ_exp / norm(Bᴮ_exp))' * (B̃ᴮ / norm(B̃ᴮ)) )
+    # nP   = norm(Pchol)
+    # nPp  = norm(Pchol_pred)
+    # nP⁺  = norm(Pchol⁺)
+    # nPd  = norm(Pchol[7:end, 7:end])
+    # nP⁺d = norm(Pchol⁺[7:end, 7:end])
+    # @debug (x_pred !== x) && (x⁺ !== x_pred)
+    # @debug (Pchol !== Pchol_pred) && (Pchol_pred !== Pchol⁺)
+
+    # @infiltrate
+    # #########
+
+    return x⁺, diodes⁺, Pchol⁺
 end
 
 # Add in new tests, comment and clean it up 
 # ForwardDIff test does NOT pass (especially the bias term. May be 'good enough'?)
 # PANIC - I dont know if we should be using ±hat(γ) b/c Zacs notes say minus. TEST!
-function prediction(x::SAT_STATE{N, T}, ω::SVector{3, T}, dt::T; calibrate_diodes::Bool = true) where {N, T}
+
+# WHAT IF I do the standard q̇ and then use the attitude Jacobian (somehow...?)
+"""
+function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate_diodes::Bool = true) where {T}
 
     # Generate axis-angle representation
     γ  = ω - x.β     # Corrected angular velocity 
@@ -205,20 +231,26 @@ function prediction(x::SAT_STATE{N, T}, ω::SVector{3, T}, dt::T; calibrate_diod
     q⁺ = (nγ == 0.0) ? x.q :
                        qmult(x.q, [cos(θ / 2); r*sin(θ / 2)])  # <- right side is axis-angle to unit quaternion
 
+    # q⁺ = (nγ == 0.0) ? x.q :
+    #                    qmult([cos(θ / 2); r*sin(θ / 2)], x.q, )  # <- left side is axis-angle to unit quaternion
+
+
+    @assert (norm(q⁺) ≈ 1.0) "Unit quaternion isn't unit!"    
     x⁺ = update_state(x; q = q⁺)  # Doesn't matter if we are calibrating diodes, only q changes in prediction
 
     # Calculate Jacobian ∂f/∂x
-    γ̂ = -hat(γ / nγ)  # Skew-symmetric matrix 
+
+    # @debug γ̂ is currently positive (Zac's is negative)
+    γ̂ = hat(γ / nγ)  # Skew-symmetric matrix 
     R = (nγ == 0.0) ? I(3)  :  # Avoid the divide-by-zero error
-                      I(3) + (γ̂ ) *sin(nγ * dt) + ((γ̂ )^2) * (1 - cos(nγ * dt)); # Rodrigues formula
+                      I(3) + (γ̂ ) * sin(nγ) + ((γ̂ )^2) * (1 - cos(nγ)); # Rodrigues formula
                       
     A = zeros(T, 6, 6)     # Jacobian of f(x) wrt x,   A  =   [R   -dt I₃;  0₃  I₃]
-    A[1:3, 1:3] .= R 
+    A[1:3, 1:3] .= R  # or -hat(ω?)
     A[1:3, 4:6] .= -dt * I(3) 
     A[4:6, 4:6] .= I(3)
     # A[4:6, 1:3] .= zeros(3, 3)
 
-    
     if calibrate_diodes
         # Add in additional states if calibrating (i.e., x = [q, β, C, α, ϵ])
         Ac = zeros(T, 6 + 3 * N, 6 + 3 * N)  # Ac = [A  0; 0 I]
@@ -230,12 +262,76 @@ function prediction(x::SAT_STATE{N, T}, ω::SVector{3, T}, dt::T; calibrate_diod
         return x⁺, A
     end
 end;
+"""
+
+# """
+    function attitude_jacobian(q)
+        G = [-q[2:4]' ; 
+            q[1] * I + hat(q[2:4])]
+        return SMatrix{4, 3, Float64, 12}(G)
+    end
+    function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate_diodes::Bool = true) where {T}
+
+        function nextq(q, ω, β)
+            # Generate axis-angle representation
+            γ  = ω - β     # Corrected angular velocity 
+            nγ = norm(γ)     # Magnitude of corrected angular velocity 
+        
+            # Predict next orientation (as a quaternion)
+            r  = γ / nγ       # Unit axis of rotation
+            θ  = nγ * dt      # Angular rotaation about unit axis
+            q⁺ = (nγ == 0.0) ?  q :
+                                qmult(q, [cos(θ / 2); r*sin(θ / 2)])
+
+            return q⁺, γ, nγ
+        end
+
+        q⁺, γ, nγ = nextq(x.q, ω, x.β)
+
+        x⁺ = update_state(x; q = q⁺)  # Doesn't matter if we are calibrating diodes, only q changes in prediction
+
+        # Calculate Jacobian ∂f/∂x
+
+        γ̂ = hat(γ / nγ)  # Skew-symmetric matrix 
+        R = (nγ == 0.0) ? I(3)  :  # Avoid the divide-by-zero error
+                        I(3) + (γ̂ ) * sin(nγ) + ((γ̂ )^2) * (1 - cos(nγ)); # Rodrigues formula
+
+        @debug R == exp(nγ * hat(γ / nγ) )
+                        
+        A = zeros(T, 6, 6)     # Jacobian of f(x) wrt x,   A  =   [R   -dt I₃;  0₃  I₃]
+
+
+        _nextq_q(_q) = nextq(_q, ω, x.β)[1]
+        _nextq_β(_β) = nextq(x.q, ω, _β)[1]
+
+        q⁺ₐ = Array(q⁺) # To prevent FD from somehow overwriting q⁺...
+        A[1:3, 1:3] .= attitude_jacobian(q⁺ₐ)' * ForwardDiff.jacobian(_nextq_q, x.q) * attitude_jacobian(x.q)   # df/dq with Attitude Jacobian 
+        A[1:3, 4:6] .= attitude_jacobian(q⁺ₐ)' * ForwardDiff.jacobian(_nextq_β, x.β) 
+        # A[1:3, 1:3] .= R 
+        # A[1:3, 4:6] .= -dt * I(3) 
+        A[4:6, 4:6] .= I(3)
+        # A[4:6, 1:3] .= zeros(3, 3)
+
+        
+        if calibrate_diodes
+            # Add in additional states if calibrating (i.e., x = [q, β, C, α, ϵ])
+            Ac = zeros(T, 6 + 3 * N, 6 + 3 * N)  # Ac = [A  0; 0 I]
+            Ac[1:6, 1:6] .= A 
+            Ac[7:end, 7:end] .= I(3 * N)
+            
+            return x⁺, Ac
+        else
+            return x⁺, A
+        end
+    end;
+# """
 
 
 # Clean up and add new tests
 # Test - Our H seems to be half of forward diff?
 # Good comments in the OG
-function mag_measurement(x::SAT_STATE{N, T}, Bᴵ::SVector{3, T}; calibrate_diodes::Bool = true) where {N, T}
+# Should the Bs be unit?
+function mag_measurement(x::SAT_STATE{T}, Bᴵ::SVector{3, T}, N::Int; calibrate_diodes::Bool = true) where {T}
 
     ## Generate expected measurements
     Bᴮ = quat2rot(x.q)' * Bᴵ;  # Transpose to convert from inertial → body
@@ -257,23 +353,25 @@ end;
 # Test - Our H seems to be half of forward diff? (as does OG)
 # Best way to deal with 'corner' in H when in unlit? Make it zero? Real small?
 # SUN INERTIAL is UNSCALED NOW!!
+# Should the Is be unit?
 # SUPER slow; with albedo(1) its 5.5ms /40alloc/416KiB, without it is 1.4μs / 30 / 4KiB; ~1ms comes from earth_albedo()
-function current_measurement(x::SAT_STATE{N, T}, sᴵ::SVector{3, T}, pos::SVector{3, T}, alb::ALBEDO; 
+function current_measurement(x::SAT_STATE{T}, diodes::DIODES{N, T}, sᴵ::SVector{3, T}, pos::SVector{3, T}, alb::ALBEDO; 
                                 E_am₀ = 1366.9, use_albedo = true, calibrate_diodes::Bool = true) where {N, T}
     # SUN INERTIAL is UNSCALED NOW!!
+    C, α, ϵ = diodes.calib_values, diodes.azi_angles, diodes.elev_angles
 
     # Generate expected measurements
     sᴵ_unit = sᴵ / norm(sᴵ)  # Unit sun vector in inertial frame
     sᴮ = quat2rot(x.q)' * (sᴵ_unit);  # Transpose to convert from inertial → body
-    n = SMatrix{N, 3, Float64, N * 3}([cos.(x.ϵ).*cos.(x.α) cos.(x.ϵ).*sin.(x.α) sin.(x.ϵ)]);  # Surface normals for each photodiode
-    currents = x.C .* (n * sᴮ)     # Expected current measurements
+    n = SMatrix{N, 3, Float64, N * 3}([cos.(ϵ).*cos.(α) cos.(ϵ).*sin.(α) sin.(ϵ)]);  # Surface normals for each photodiode
+    currents = C .* (n * sᴮ)     # Expected current measurements
     
     albedos  = zeros(T, N)
     if use_albedo
         albedo_matrix = earth_albedo(pos, sᴵ, alb.refl.data)
         for i = 1:N 
             diode_albedo = compute_diode_albedo(albedo_matrix, alb.cell_centers_ecef, n[i, :], pos)  
-            albedos[i] = (x.C[i] / E_am₀) * diode_albedo 
+            albedos[i] = (C[i] / E_am₀) * diode_albedo 
         end
     end
 
@@ -285,7 +383,7 @@ function current_measurement(x::SAT_STATE{N, T}, sᴵ::SVector{3, T}, pos::SVect
 
     # # Generate Jacobian H (current measurement wrt state)
     ŝᴮ = hat(sᴮ);          # Skew-symmetric 
-    ∂θ = (x.C .* n) * ŝᴮ   # How slight changes in orientation affect expected current field (∂I/∂θ)
+    ∂θ = (C .* n) * ŝᴮ     # How slight changes in orientation affect expected current field (∂I/∂θ)
     ∂β = zeros(T, N, 3)    # How slight changes in gyro bias affect expected current field (∂I/∂β)
     
 
@@ -297,12 +395,12 @@ function current_measurement(x::SAT_STATE{N, T}, sᴵ::SVector{3, T}, pos::SVect
 
     if calibrate_diodes
         # Jacobian Matrix  H = [∂θ ∂β ∂C ∂α ∂ϵ]
-        ndα = [(-cos.(x.ϵ).*sin.(x.α)) ( cos.(x.ϵ).*cos.(x.α)) zeros(size(x.α))];
-        ndϵ = [(-sin.(x.ϵ).*cos.(x.α)) (-sin.(x.ϵ).*sin.(x.α)) cos.(x.ϵ)]; # (With negative middle term, differing from the paper)
+        ndα = [(-cos.(ϵ).*sin.(α)) ( cos.(ϵ).*cos.(α)) zeros(size(α))];
+        ndϵ = [(-sin.(ϵ).*cos.(α)) (-sin.(ϵ).*sin.(α)) cos.(ϵ)]; # (With negative middle term, differing from the paper)
         
         ∂C = n * sᴮ;            # [i,]
-        ∂α = x.C .* (ndα * sᴮ);   # [i,]
-        ∂ϵ = x.C .* (ndϵ * sᴮ);   # [i,]  
+        ∂α = C .* (ndα * sᴮ);   # [i,]
+        ∂ϵ = C .* (ndϵ * sᴮ);   # [i,]  
 
         H[:, 7:end] .= [Diagonal(∂C) Diagonal(∂α) Diagonal(∂ϵ)]
     end
@@ -310,12 +408,12 @@ function current_measurement(x::SAT_STATE{N, T}, sᴵ::SVector{3, T}, pos::SVect
     Is[Is .< 1e-8]   .= 0.0   # Photodiodes don't generate negative current
     H[Is .≤  0.0, :] .= 0.0   #   ^ to match the above 
 
-    return Is, H
+    return (Is / norm(Is)), H
 end;
 
 
 
-function update(x::SAT_STATE{N, T}, L::Matrix{T}, z::SVector{N₂, T}; calibrate_diodes::Bool = true) where {N, N₂, T}
+function update(x::SAT_STATE{T}, diodes::DIODES{N, T}, L::Matrix{T}, z::SVector{N₂, T}; calibrate_diodes::Bool = true) where {N, N₂, T}
 
     """ Uses kalman gain and innovation to update the best estimate for the satellite state """
     
@@ -334,18 +432,19 @@ function update(x::SAT_STATE{N, T}, L::Matrix{T}, z::SVector{N₂, T}; calibrate
     
     # Update the calibration states if desired
     i₀ = 7; i₁ = i₀ + N - 1
-    C⁺ = (calibrate_diodes) ? x.C + δx[i₀:i₁] : x.C
+    C⁺ = (calibrate_diodes) ? diodes.calib_values + δx[i₀:i₁] : diodes.calib_values
 
     i₀ = i₁ + 1; i₁ = i₀ + N - 1
-    α⁺ = (calibrate_diodes) ? x.α + δx[i₀:i₁] : x.α
+    α⁺ = (calibrate_diodes) ? diodes.azi_angles + δx[i₀:i₁] : diodes.azi_angles
 
     i₀ = i₁ + 1; i₁ = i₀ + N - 1
-    ϵ⁺ = (calibrate_diodes) ? x.ϵ + δx[i₀:i₁] : x.ϵ 
+    ϵ⁺ = (calibrate_diodes) ? diodes.elev_angles + δx[i₀:i₁] : diodes.elev_angles 
 
 
-    x⁺ = SAT_STATE(q⁺, β⁺, C⁺, α⁺, ϵ⁺)
+    x⁺ = SAT_STATE(q⁺, β⁺)
+    diodes⁺ = DIODES(C⁺, α⁺, ϵ⁺)
 
-    return x⁺
+    return x⁺, diodes⁺
 end
 
 
