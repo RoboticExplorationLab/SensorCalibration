@@ -145,6 +145,7 @@ function R(q::Vector{T})::Matrix{T} where {T}
     M[1, 2:4] .= -qᵥ       # 30 ns, 1 alloc, 112 bytes  (b/c negative)
     M[2:4, 1] .=  qᵥ       # 20 ns, 0 alloc
     M[2:4, 2:4] .= rHat(qₛ, qᵥ) #  About 150ns slower, 3 fewer alloc, and 400 fewer bytes
+    # M[2:4, 2:4] .= qₛ * I(3) - hat(qᵥ)
 
     # # NOTE the below method is the same, but about 10x slower and 10x #allocations
     # qₛ, qᵥ = q[1], q[2:4]
@@ -179,13 +180,16 @@ const H = [zeros(1, 3); I(3)]     # Converts from a 3-element vector to a 4-elem
 
 const T = [1 0 0 0; 0 -1 0 0; 0 0 -1 0; 0 0 0 -1]   # Forms the conjugate of q, i.e. q† = Tq   
 
+qconj(q) = [1 0 0 0; 0 -1 0 0; 0 0 -1 0; 0 0 0 -1] * q
 
 # Add test - L(q₂) q₁ == R(q₁) * q₂
 function qmult(q₁, q₂)
-    return L(q₂) * q₁
+    return L(q₁) * q₂
 end
 
-⊙(q₁::Vector, q₂::Vector) = L(q₂) * q₁
+⊙(q₁::Vector, q₂::Vector) = qmult(q₁, q₂)
+⊙(q₁::SVector{4, T}, q₂::SVector{4, T}) where {T} = qmult(q₁, q₂)
+⊙(q₁, q₂) = qmult(q₁, q₂)
 
 # Takes q and ω → q̇
 function qdot(q::Vector{T}, ω::Vector{T}) where {T}
@@ -229,4 +233,64 @@ function G(q::SVector{4, T}) where {T}
     return G
 end
 
+
+
+function rot2quat(R)
+    # Converts a Rotation matrix into a scalar-first quaternion (From Kevin)
+
+    T = R[1,1] + R[2,2] + R[3,3];
+    if (T > R[1,1]) && (T > R[2,2]) && (T>R[3,3])
+        q4 = .5*sqrt(1+T);
+        r  = .25/q4;
+        q1 = (R[3,2] - R[2,3])*r;
+        q2 = (R[1,3] - R[3,1])*r;
+        q3 = (R[2,1] - R[1,2])*r;
+    elseif R[1,1]>R[2,2] && R[1,1]>R[3,3]
+        q1 = .5*sqrt(1-T + 2*R[1,1]);
+        r  = .25/q1;
+        q4 = (R[3,2] - R[2,3])*r;
+        q2 = (R[1,2] + R[2,1])*r;
+        q3 = (R[1,3] + R[3,1])*r;
+    elseif R[2,2]>R[3,3]
+        q2 = .5*sqrt(1-T + 2*R[2,2]);
+        r  = .25/q2;
+        q4 = (R[1,3] - R[3,1])*r;
+        q1 = (R[1,2] + R[2,1])*r;
+        q3 = (R[2,3] + R[3,2])*r;
+    else
+        q3 = .5*sqrt(1-T + 2*R[3,3]);
+        r  = .25/q3;
+        q4 = (R[2,1] - R[1,2])*r;
+        q1 = (R[1,3] + R[3,1])*r;
+        q2 = (R[2,3] + R[3,2])*r;
+    end
+
+    q = [q4; q1; q2; q3] 
+
+    if q4 < 0
+       q = -q;
+    end
+
+    return q
+end
+
+function cayley_map(q₁, q₂)
+    qₑ = L(q₁)' * q₂
+    e  =  (qₑ[2:4] / qₑ[1])
+    return e
+end
+
+
+
+# @testset "Rot 2 Quat" begin 
+#     N = 1000
+#     ts = zeros(N)
+#     for i = 1:N
+
+#         q = randn(4); q /= norm(q)
+#         q̂ = rot2quat(quat2rot(q))
+#         ts[i] = ((q ≈ q̂) || (q ≈ -q̂))
+#     end
+#     @test all(ts .== 1)
+# end
 
