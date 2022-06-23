@@ -8,7 +8,10 @@ and control inputs are only allowed for the orientation.
 using LinearAlgebra, StaticArrays
 using Plots
 using Test
-include("quaternions.jl")
+include("../src/MissionSim/quaternions.jl")
+
+
+μ = 3.9860044188e14
 
 
 ######################
@@ -18,7 +21,7 @@ include("quaternions.jl")
 # Dont allow for controls, and dont allow for just passing in state... (need a different dynamics interface...? like in energy)
 #        OR use static...?
 
-function dynamics(x, u = zeros(3), J::Matrix = zeros(1, 1); use_J₂::Bool = false, μ::Float64 = 3.9860044188e14, J₂::Float64 = 0.0010826269)
+function dynamics(x, u = zeros(3), J::Matrix = ones(1, 1); use_J₂::Bool = false, μ::Float64 = 3.9860044188e14, J₂::Float64 = 0.0010826269)
     N = size(x, 1)
     if N == 6       # Pure translation 
         return dynamics(x[1:3], x[4:6], use_J₂; μ = μ, J₂ = J₂)

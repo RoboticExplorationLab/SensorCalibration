@@ -85,8 +85,9 @@
     end;
 
     @testset "  Check angular velocity decreases" begin 
-        include("../../src/MissionSim/Controller/Controller.jl"); using .Controller
-        include("../../src/MissionSim/mag_field.jl")
+        if !(@isdefined generate_command)
+            include("../../src/MissionSim/Controller/Controller.jl"); using .Controller
+        end
 
         # Set up initial state  
         Rₛ = 6378.1363e3 + 900e3  # m
@@ -124,7 +125,7 @@
         end
 
         # plot( hcat(ωs...)' )
-        @test norm(ωs[end]) ≈ 0.0 atol = 1e-4
+        @test norm(ωs[end]) < 0.01
     end;
 
     @testset "  Check eclipse" begin 
@@ -315,8 +316,26 @@
 
     end;
 
-    @testset "  Compare rk4 methods" begin
-        @warn "Not implemented!"
-    end;
-end; 
+    @testset "  Verify one full rotation" begin 
+        # Does my RK4 rotate in a circle correctly?
+        q₀ = SVector{4, Float64}(1, 0, 0, 0)
+        β  = SVector{3, Float64}(0, 0, 0)
+        ω  = SVector{3, Float64}(0.0, deg2rad(36), 0.0)
+        J  = SMatrix{3, 3, Float64, 9}([0.2 0 0; 0 0.2 0; 0 0 0.2])
+        u  = SVector{3, Float64}(0.0, 0, 0)
 
+        x = STATE(; q = q₀, β = β, ω = ω)
+        t = Epoch(2020, 1, 1)
+        dt = 0.1
+        N = Int(10 / dt)
+        for i = 1:N
+            x = Simulator.rk4(J, x, u, t, dt; σβ = 0.0)  # No bias
+        end
+
+        @test norm(cayley_map(x.q, q₀)) ≈ 0.0 atol = 1e-6
+    end;
+
+    # @testset "  Compare rk4 methods" begin
+    #     @warn "Not implemented!"
+    # end;
+end; 

@@ -10,18 +10,17 @@ using Distributions
 
 include("../src/MissionSim/Estimator/Estimator.jl");  using .Estimator 
 
-using .Estimator.CustomStructs  # so can just call them directly with Estimator.
-
-include("../src/MissionSim/quaternions.jl")
-include("../src/MissionSim/mag_field.jl")
-
-# include("Estimator/magnetometer_calibration_tests.jl");
+# Ensure the appropriate scripts are included, but only once (important for struct declarations)
+(@isdefined STATE)       ? nothing : using .Estimator.CustomStructs
+(@isdefined SimpleOrbit) ? nothing : include("SimpleOrbit.jl");
+(@isdefined IGRF13)      ? nothing : include("../src/MissionSim/mag_field.jl");
+(@isdefined qdot)        ? nothing : include("../src/MissionSim/quaternions.jl");
 
 function chol(M)
     # return cholesky(Symmetric(M)).U 
     return cholesky(Hermitian(M)).U
 end
-
+include("Estimator/magnetometer_calibration_tests.jl");
 include("Estimator/mekf_tests.jl");
 
 

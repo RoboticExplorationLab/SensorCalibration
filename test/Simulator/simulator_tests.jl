@@ -4,16 +4,16 @@
   - to avoid scope conflicts, I am just calling CustomStructs through Simulator rn...
 """
 
-""" Stuff needed to run this independently
-    using Test, BenchmarkTools
-    using StaticArrays, LinearAlgebra, Plots, SatelliteDynamics, EarthAlbedo, JLD2, Distributions
+##### Stuff needed to run this independently ####################################################
+# using Test, BenchmarkTools
+# using StaticArrays, LinearAlgebra, Plots, SatelliteDynamics, EarthAlbedo, JLD2, Distributions
 
-    include("../../src/MissionSim/CustomStructs.jl");  using .CustomStructs 
-    include("../../src/MissionSim/Simulator/dynamics.jl")
-    include("../../src/MissionSim/Simulator/measurements.jl")
-    include("../../src/MissionSim/quaternions.jl")
-    include("../../src/MissionSim/mag_field.jl")
-"""
+# include("../../src/MissionSim/CustomStructs.jl");  using .CustomStructs 
+# include("../../src/MissionSim/Simulator/dynamics.jl")
+# include("../../src/MissionSim/Simulator/measurements.jl")
+# include("../../src/MissionSim/quaternions.jl")
+# include("../../src/MissionSim/mag_field.jl")
+#################################################################################################
 
 
 @testset "Simulator Tests" begin 
@@ -32,7 +32,7 @@
 
         refl = load_refl("../src/MissionSim/data/refl.jld2", scale)  
         cell_centers_ecef = get_albedo_cell_centers(lat_step, lon_step) 
-        return Simulator.ALBEDO(refl, cell_centers_ecef)
+        return ALBEDO(refl, cell_centers_ecef)
     end;
 
     function get_albedo_cell_centers(lat_step = 1, lon_step = 1.25)
@@ -74,24 +74,23 @@
         # Call the primary functions
         u = SVector{3, Float64}( zeros(3) ) 
         alb = get_albedo(2);
-        sat = Simulator.SATELLITE();
-        x   = Simulator.STATE();
+        sat = SATELLITE();
+        x   = STATE();
         t   = Epoch(2021, 12, 25); 
         dt  = 1.0;
 
         x = rk4(sat.J, x, u, t, dt)
         truth, sensors, ecl, noise = generate_measurements(sat, alb, x, t, dt);
-
     end;
 
     @testset "  Sequence, simplified" begin 
         # No noise, bias, fancy gravity terms, etc...
-        perfect_mag = Simulator.MAGNETOMETER(; ideal = true);  
+        perfect_mag = MAGNETOMETER(; ideal = true);  
 
-        x = Simulator.STATE(; β = SVector{3, Float64}(0.0, 0.0, 0.0), ω = SVector{3, Float64}(-0.1, 0.1, 0.25)) 
+        x = STATE(; β = SVector{3, Float64}(0.0, 0.0, 0.0), ω = SVector{3, Float64}(-0.1, 0.1, 0.25)) 
         u = SVector{3, Float64}( zeros(3) ) 
         alb = get_albedo(2);
-        sat = Simulator.SATELLITE(mag = perfect_mag);
+        sat = SATELLITE(mag = perfect_mag);
         t   = Epoch(2020, 7, 4); 
         dt  = 2.0;
         N   = 5000;
@@ -125,10 +124,10 @@
 
     @testset "  Sequence, full" begin 
 
-        x = Simulator.STATE() 
+        x = STATE() 
         u = SVector{3, Float64}( zeros(3) ) 
         alb = get_albedo(2);
-        sat = Simulator.SATELLITE();
+        sat = SATELLITE();
         t   = Epoch(2020, 7, 4); 
         dt  = 2.0;
         N   = 5000;

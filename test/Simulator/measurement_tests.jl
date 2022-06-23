@@ -263,7 +263,7 @@
         end
 
         d₁, d₂, d₃ = albTest(a₁, a₂, a₃, sat, x, ecl, sᴵ, sᴮ; verbose = false)
-        @test d₁[1] ≈ d₂[1] atol = 1e-3
+        @test d₁[1] ≈ d₂[1] atol = 1e-2
 
         # Test that I = Ĩ - η, I ≥ 0.0, I = 0.0 during eclipse, etc... 
         I, Ĩ, ηI = Simulator.diode_measurement(sat, a₁, x, ecl, sᴵ, sᴮ);
@@ -299,9 +299,9 @@
         @test sum(abs.(ηI)) == 0.0
 
         # Different number of diodes
-        sat = Simulator.SATELLITE(; sta = Simulator.SAT_STATE(; N = 10), dio = Simulator.DIODES(; N = 10))
+        sat = Simulator.SATELLITE(; sta = Simulator.SAT_STATE(), dio = Simulator.DIODES(; N = 10))
         ecl = 1.0
-        I, Ĩ, ηI = Simulator.diode_measurement(sat, a₂, x, ecl, sᴵ, sᴮ; σ_scale = 0.5);
+        I, Ĩ, ηI = Simulator.diode_measurement(sat, a₂, x, ecl, sᴵ, sᴮ; σ_scale = 0.05);
         @test I[I .> 0.0] ≈ (Ĩ - ηI)[I .> 0.0]
         @test all(I .≥ 0.0)
 
@@ -309,7 +309,7 @@
         I, Ĩ, ηI = Simulator.diode_measurement(sat, a₂, x, ecl, sᴵ, sᴮ);
         @test sum(abs.(I)) == 0.0
         @test Ĩ == ηI 
-  
+
     end;
 
     @testset "  Sun Measurement" begin 
@@ -422,7 +422,7 @@
         x   = Simulator.STATE() 
         t   = Epoch(2019, 5, 29)
         dt  = 0.1
-        Bᴵ, Bᴮ, B̃ᴮ = Simulator.mag_measurement(sat, x, quat2rot(x.q), t, dt)
+        Bᴵ, Bᴮ, B̃ᴮ = Simulator.mag_measurement(sat, x, quat2rot(x.q)', t, dt)
         @test norm(Bᴵ) ≈ norm(Bᴮ)
 
         # Verify a perfect magnetometer results in an unchanged mag vector 
@@ -430,7 +430,7 @@
         x   = Simulator.STATE() 
         t   = Epoch(2020, 9, 2)
         dt  = 0.5
-        Bᴵ, Bᴮ, B̃ᴮ = Simulator.mag_measurement(sat, x, quat2rot(x.q), t, dt; σ = 0.0)
+        Bᴵ, Bᴮ, B̃ᴮ = Simulator.mag_measurement(sat, x, quat2rot(x.q)', t, dt; σ = 0.0)
         @test norm(Bᴵ) ≈ norm(Bᴮ)
         @test Bᴮ == B̃ᴮ
 
@@ -439,10 +439,22 @@
         x   = Simulator.STATE(; q = SVector{4, Float64}(1, 0, 0, 0)) 
         t   = Epoch(2020, 9, 2)
         dt  = 0.75
-        Bᴵ, Bᴮ, B̃ᴮ = Simulator.mag_measurement(sat, x, quat2rot(x.q), t, dt)
+        Bᴵ, Bᴮ, B̃ᴮ = Simulator.mag_measurement(sat, x, quat2rot(x.q)', t, dt)
         @test norm(Bᴵ) ≈ norm(Bᴮ)
         @test Bᴮ != B̃ᴮ
         @test Bᴵ == Bᴮ
+
+
+        # Verify that the calibration matrix works 
+        x   = Simulator.STATE()
+        sat_state = Simulator.SAT_STATE(; q = x.q, β = x.β)
+        sat = Simulator.SATELLITE(; sta = sat_state) 
+        Tt  = Simulator.get_mag_calibration_matrix(sat)
+        t   = Epoch(2020, 1, 4)
+        dt  = 1.0 
+        Bᴵ, Bᴮ, B̃ᴮ = Simulator.mag_measurement(sat, x, quat2rot(x.q)', t, dt; σ = 0.0)
+        @test Bᴮ ≈ Tt \ (B̃ᴮ - sat.magnetometer.bias)
+        @test  Bᴵ ≈ quat2rot(x.q) * (Tt \ (B̃ᴮ - sat.magnetometer.bias))
 
     end;
 

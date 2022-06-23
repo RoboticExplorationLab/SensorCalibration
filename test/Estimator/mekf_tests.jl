@@ -3,14 +3,16 @@
 """ To Do:
  - A (in prediction) does not appear to be correct
  - H in mag_meas is half? Same with current_meas
- - Speed test prediction
  - These are all kinda messy tests (pull out shared things, delete useless)
 
  - I am a little concerned that the covariance doesnt decrease in the last of 'estimate'
+
+ - in mekf, we can't use x.ω, we need x.ω + β
+ - Check for ===
 """
 
 
-# # Stuff needed to run this independently
+######## Stuff needed to run this independently ##################################
 # using Test, BenchmarkTools 
 # using StaticArrays, LinearAlgebra
 # using ForwardDiff, Plots, EarthAlbedo, SatelliteDynamics, JLD2
@@ -19,10 +21,13 @@
 # include("../../src/MissionSim/Estimator/mekf.jl");
 
 # include("../../src/MissionSim/quaternions.jl")
-# include("../../src/MissionSimmag_field.jl")
-# #
+# include("../../src/MissionSim/mag_field.jl")
+# # # (Also change the path in get_albedo)
+##################################################################################
 
 @testset "MEKF Tests" begin 
+    import .Estimator.prediction, .Estimator.mag_measurement, .Estimator.current_measurement
+    import .Estimator.sqrt_mekf, .Estimator.estimate, .Estimator.reset_cov!
 
     function get_albedo(scale = 1) 
 
@@ -36,7 +41,7 @@
         lat_step = 1.0 * scale
         lon_step = 1.25 * scale
 
-        refl = load_refl("../src/MissionSim/data/refl.jld2", scale)  # Not sure this will quite work...
+        refl = load_refl("../src/MissionSim/data/refl.jld2", scale)  
         cell_centers_ecef = get_albedo_cell_centers(lat_step, lon_step) 
         return ALBEDO(refl, cell_centers_ecef)
     end;
@@ -80,18 +85,17 @@
         p =  6.871e6  * SVector{3, Float64}(p) #
     end;
 
-    function vectrify(x::SAT_STATE{N, T}) where {N, T}
+    function vectrify(x::SAT_STATE{T}, d::DIODES{N, T}) where {N, T}
         v = zeros(T, 25)
         v[1:4]    .= x.q
         v[5:7]    .= x.β 
-        v[8:13]   .= x.C 
-        v[14:19]  .= x.α 
-        v[20:25]  .= x.ϵ
+        v[8:13]   .= d.calib_values
+        v[14:19]  .= d.azi_angles
+        v[20:25]  .= d.elev_angles
         return v
     end;
 
     
-
     # Everything works except Jacobian A 
     @testset "Prediction" begin 
 
@@ -99,37 +103,37 @@
         x = SAT_STATE()
         ω  = SVector{3, Float64}(randn(3))
         dt = 1.0
-        x⁺, A = Estimator.prediction(x, ω, dt; calibrate_diodes = false)
+        N = 6
+        x⁺, A =  prediction(x, ω, dt, N; calibrate_diodes = false)
         @test size(A) == (6, 6)
         @test size(x⁺.q) == (4,)
         @test norm(x⁺.q) ≈ 1.0
-        @test (x.C == x⁺.C) && (x.α == x⁺.α) && (x.ϵ == x⁺.ϵ)  # Shouldn't change, even if calibrating diodes 
         # @code_warntype prediction(x, ω, dt)
         # @btime prediction($x, $ω, $dt; calibrate_diodes = true)
 
 
         # Standard function call, with diodes (shouldn't really be different, except size of A)
         x⁺_uncal = deepcopy(x⁺)   # To compare to 
-        x⁺, A = Estimator.prediction(x, ω, dt; calibrate_diodes = true)
+        x2⁺, A =  prediction(x, ω, dt, N; calibrate_diodes = true)
         @test size(A) == (24, 24)
         @test all(A[7:end, 1:6] .== 0)
         @test all(A[1:6, 7:end] .== 0)
         @test A[7:end, 7:end] == I(18)
-        @test x⁺_uncal == x⁺     
+        @test (x⁺_uncal == x⁺) #&& (x⁺_uncal !== x⁺)     
 
         # No angular velocity or bias results in no change in q (without diodes)
         x = SAT_STATE(; β = zeros(3))
         ω  = SVector{3, Float64}(zeros(3))
         dt = 1.2
-        x⁺, A = Estimator.prediction(x, ω, dt; calibrate_diodes = false)
+        x⁺, A =  prediction(x, ω, dt, N; calibrate_diodes = false)
         @test x.q == x⁺.q
-        @test sum(diag(A)) == 6
+        @test sum(diag(A)) ≈ 6
         
-        # ... with diode calibratoin
+        # ... with diode calibration
         x = SAT_STATE(; β = zeros(3))
         ω  = SVector{3, Float64}(zeros(3))
         dt = 0.67
-        x⁺, A = Estimator.prediction(x, ω, dt; calibrate_diodes = true)
+        x⁺, A =  prediction(x, ω, dt, N; calibrate_diodes = true)
         @test x.q == x⁺.q
         @test sum(diag(A)) == 24
 
@@ -139,7 +143,7 @@
         x = SAT_STATE()
         ω  = SVector{3, Float64}(randn(3))
         dt = 0.92
-        x⁺, A = Estimator.prediction(x, ω, dt; calibrate_diodes = false)
+        x⁺, A =  prediction(x, ω, dt, N; calibrate_diodes = false)
         Q = A[1:3, 1:3]
         @test (Q' * Q) ≈ I(3)
         @test det(Q) ≈ 1.0
@@ -149,7 +153,7 @@
         x = SAT_STATE()
         ω  = SVector{3, Float64}(randn(3))
         dt = 5.0
-        x⁺, A = Estimator.prediction(x, ω, dt; calibrate_diodes = true)
+        x⁺, A =  prediction(x, ω, dt, N; calibrate_diodes = true)
         Q = A[1:3, 1:3]
         @test (Q' * Q) ≈ I(3)
         @test det(Q) ≈ 1.0
@@ -167,26 +171,25 @@
         x = SAT_STATE()
         ω  = SVector{3, Float64}(randn(3))
         dt = 0.92
-        x⁺, A = Estimator.prediction(x, ω, dt) 
-        @test (x⁺.β == x.β) &&  x⁺.q ≉ x.q  &&
-               x⁺.C == x.C  &&  x⁺.α == x.α &&
-               x⁺.ϵ == x.ϵ
-    end
+        x⁺, A =  prediction(x, ω, dt, N) 
+        @test (x⁺.β == x.β) &&  x⁺.q ≉ x.q  
+    end;
 
     # Our H is 0.5 * ForwardDiff's H
     @testset "Mag Measurement" begin 
         # Standard function call (without calibration)
+        N = 6
         x  = SAT_STATE()
         Bᴵ = SVector{3, Float64}(randn(3))
-        Bᴮ, Hb = Estimator.mag_measurement(x, Bᴵ; calibrate_diodes = false)
-        # @code_warntype Estimator.mag_measurement(x, Bᴵ)
-        # @btime Estimator.mag_measurement($x, $Bᴵ)         # Most of cost comes from quaternion functions
+        Bᴮ, Hb =  mag_measurement(x, Bᴵ, N; calibrate_diodes = false)
+        # @code_warntype  mag_measurement(x, Bᴵ, N)
+        # @btime  mag_measurement($x, $Bᴵ)         # Most of cost comes from quaternion functions
         @test (size(Bᴮ) == (3,)) && (size(Hb) == (3, 6))
 
         # Standard function call (with calibration) -> Should only affect sizes 
         x  = SAT_STATE()
         Bᴵ = SVector{3, Float64}(randn(3))
-        Bᴮ, Hb = Estimator.mag_measurement(x, Bᴵ; calibrate_diodes = true)
+        Bᴮ, Hb =  mag_measurement(x, Bᴵ, N; calibrate_diodes = true)
         @test (size(Bᴮ) == (3,)) && (size(Hb) == (3, 24))
 
 
@@ -194,7 +197,7 @@
         #  Bᴵ == Bᴮ if no rotation
         x  = SAT_STATE(; q = [1, 0, 0, 0])  # No rotation
         Bᴵ = SVector{3, Float64}(randn(3))
-        Bᴮ, _ = Estimator.mag_measurement(x, Bᴵ)
+        Bᴮ, _ =  mag_measurement(x, Bᴵ, N)
         @test Bᴮ == Bᴵ 
         
         #  ||Bᴵ|| = ||Bᴮ|| even with rotation
@@ -203,7 +206,7 @@
         for i = 1:Nₜ
             x  = SAT_STATE()  
             Bᴵ = SVector{3, Float64}(randn(3))
-            Bᴮ, Hb = Estimator.mag_measurement(x, Bᴵ)
+            Bᴮ, Hb =  mag_measurement(x, Bᴵ, N)
             ts[i] = (norm(Bᴮ) ≈ norm(Bᴵ)) && (quat2rot(x.q) * Bᴮ ≈ Bᴵ)
         end 
         @test sum(ts) == Nₜ
@@ -211,8 +214,8 @@
         #  Calibrating doesn't affect B 
         x  = SAT_STATE()  
         Bᴵ = SVector{3, Float64}(randn(3))
-        Bᴮ_nocal, _ = Estimator.mag_measurement(x, Bᴵ; calibrate_diodes = false)
-        Bᴮ_cal, _   = Estimator.mag_measurement(x, Bᴵ; calibrate_diodes = true)
+        Bᴮ_nocal, _ =  mag_measurement(x, Bᴵ, N; calibrate_diodes = false)
+        Bᴮ_cal, _   =  mag_measurement(x, Bᴵ, N; calibrate_diodes = true)
         @test Bᴮ_nocal == Bᴮ_cal
 
 
@@ -224,7 +227,7 @@
         for i = 1:Nₜ
             x  = SAT_STATE()  # with rotation
             Bᴵ = SVector{3, Float64}(randn(3))
-            Bᴮ, Hb = Estimator.mag_measurement(x, Bᴵ; calibrate_diodes = false)
+            Bᴮ, Hb =  mag_measurement(x, Bᴵ, N; calibrate_diodes = false)
             ts[i] = all(Hb[:, 4:6] .== 0.0) && all(diag(Hb[:, 1:3]) .== 0.0) &&
                         (Hb[1, 2] == -Hb[2, 1]) && (Hb[1, 3] == -Hb[3, 1])
         end 
@@ -236,7 +239,7 @@
         for i = 1:Nₜ
             x  = SAT_STATE()  # with rotation
             Bᴵ = SVector{3, Float64}(randn(3))
-            Bᴮ, Hb = Estimator.mag_measurement(x, Bᴵ; calibrate_diodes = false)
+            Bᴮ, Hb =  mag_measurement(x, Bᴵ, N; calibrate_diodes = false)
             ts[i] = all(Hb[:, 4:end] .== 0.0) && all(diag(Hb[:, 1:3]) .== 0.0) &&
                         (Hb[1, 2] == -Hb[2, 1]) && (Hb[1, 3] == -Hb[3, 1])
         end 
@@ -268,21 +271,23 @@
         Nₜ = 100 
         ts = zeros(Nₜ)
         for i = 1:Nₜ
-            x  = SAT_STATE()  # with rotation
+            x = SAT_STATE()  # with rotation
+            d = DIODES()
             Bᴵ = SVector{3, Float64}(randn(3))
-            Bᴮ₁, H₁ = Estimator.mag_measurement(x, Bᴵ; calibrate_diodes = true)
-            Bᴮ₂, H₂ = mag_measurement_vec(vectrify(x), Bᴵ; calibrate_diodes = true)
+            Bᴮ₁, H₁ =  mag_measurement(x, Bᴵ, N; calibrate_diodes = true)
+            Bᴮ₂, H₂ = mag_measurement_vec(vectrify(x, d)[1:7], Bᴵ; calibrate_diodes = true)
             ts[i] = (Bᴮ₁ ≈ Bᴮ₂) && (H₁ ≈ H₂)
         end
         @test sum(ts) == Nₜ
 
         # (2) Use ForwardDiff and compare it to ours 
-        x  = SAT_STATE() 
+        x = SAT_STATE() 
+        d = DIODES()
         Bᴵ = SVector{3, Float64}(randn(3))
 
         _mag_measurement_vec(_x) = mag_measurement_vec(_x, Bᴵ; calibrate_diodes = true)[1];  # Only want Bᴮ, not H
-        Bᴮ_cust, H_cust = Estimator.mag_measurement(x, Bᴵ; calibrate_diodes = true)
-        H_diff = ForwardDiff.jacobian(_mag_measurement_vec, vectrify(x))
+        Bᴮ_cust, H_cust =  mag_measurement(x, Bᴵ, N; calibrate_diodes = true)
+        H_diff = ForwardDiff.jacobian(_mag_measurement_vec, vectrify(x, d))
         E(q) = [G(q)   zeros(4, 21);
                 zeros(21, 3)   I(21) ];
 
@@ -290,37 +295,40 @@
         
         @test H_diff_adj ≈ H_cust
         @test H_diff_adj ≈ 2 * H_cust
-    end
+    end;
 
     # Our H is also 0.5 * ForwardDiff (for part)
     @testset "Current Measurement" begin 
         # Standard function call (without calibration)
         x = SAT_STATE() 
+        d = DIODES()
         t = Epoch(2020, 4, 4)
         sᴵ = SVector{3, Float64}(sun_position(t))
         pos = 6.871e6 * SVector{3, Float64}([1.0; randn(2)])
         alb = get_albedo(1)
-        Is, Hi = Estimator.current_measurement(x, sᴵ, pos, alb; calibrate_diodes = false)
-        # @code_warntype Estimator.current_measurement(x, sᴵ, pos, alb)
-        # @btime Estimator.current_measurement($x, $xᴵ, $pos, $alb);  # Slow, on order of ~most
+        Is, Hi =  current_measurement(x, d, sᴵ, pos, alb; calibrate_diodes = false)
+        # @code_warntype  current_measurement(x, sᴵ, pos, alb)
+        # @btime  current_measurement($x, $xᴵ, $pos, $alb);  # Slow, on order of ~most
         @test (size(Is) == (6,)) && (size(Hi) == (6, 6))
         @test all(Hi[Is .≤ 0.0, :] .== 0.0)
 
         # Standard function call (without albedo)
         x = SAT_STATE() 
+        d = DIODES()
         t = Epoch(2020, 10, 10)
         sᴵ = SVector{3, Float64}(sun_position(t))
         pos = 6.871e6 * SVector{3, Float64}([randn(); 1.0; randn()])
-        Is, Hi = Estimator.current_measurement(x, sᴵ, pos, alb; use_albedo = false)
+        Is, Hi =  current_measurement(x, d, sᴵ, pos, alb; use_albedo = false)
         @test (size(Is) == (6,)) && (size(Hi) == (6, 24))
         @test all(Hi[Is .≤ 0.0, :] .== 0.0)
 
         # Standard function call (with albedo and calibration)
         x = SAT_STATE() 
+        d = DIODES()
         t = Epoch(2020, 12, 25)
         sᴵ = SVector{3, Float64}(sun_position(t))
         pos = 6.871e6 * SVector{3, Float64}([randn(); randn(); 1.0])
-        Is, Hi = Estimator.current_measurement(x, sᴵ, pos, alb; use_albedo = false)
+        Is, Hi =  current_measurement(x, d, sᴵ, pos, alb; use_albedo = false)
         @test (size(Is) == (6,)) && (size(Hi) == (6, 24))
         @test all(Hi[Is .≤ 0.0, :] .== 0.0)
     
@@ -328,45 +336,49 @@
         ##### Test Is (diode currents) #####
         #    Non-negative, both with and without albedo 
         x = SAT_STATE() 
+        d = DIODES()
         t = Epoch(2021, 7, 1)
         sᴵ = SVector{3, Float64}(sun_position(t))
         pos = random_pose()
         alb = get_albedo(1)
-        Is, _ = Estimator.current_measurement(x, sᴵ, pos, alb; use_albedo = true)
+        Is, _ =  current_measurement(x, d, sᴵ, pos, alb; use_albedo = true)
         @test all(Is .≥ 0.0)
 
         x = SAT_STATE() 
+        d = DIODES()
         t = Epoch(2019, 10, 15)
         sᴵ = SVector{3, Float64}(sun_position(t))
         pos = random_pose()  
-        Is, _ = Estimator.current_measurement(x, sᴵ, pos, alb; use_albedo = false)
+        Is, _ =  current_measurement(x, d, sᴵ, pos, alb; use_albedo = false)
         @test all(Is .≥ 0.0)
 
-        #    Every other one has to be zero for evenly spaced siodes
-        x = SAT_STATE(; ideal = true) 
-        t = Epoch(2019, 7, 1)
-        sᴵ = SVector{3, Float64}(sun_position(t))
-        pos = random_pose()  
-        Is, _ = Estimator.current_measurement(x, sᴵ, pos, alb; use_albedo = true)
-        @test length(Is[Is .> 0.0]) == 3
-
+        #    One per pair has to be zero for evenly spaced sides and NO albedo
+        x = SAT_STATE(; ideal = true);
+        d = DIODES(; ideal = true);
+        t = Epoch(2019, 7, 1);
+        sᴵ = SVector{3, Float64}(sun_position(t));
+        pos = random_pose();
+        Is, _ =  current_measurement(x, d, sᴵ, pos, alb; use_albedo = false);
+        @test length(Is[Is .> 0.001]) == 3 
         
         ##### Test measurement Jacobian H #####
         #    H is 0 where I is 0; ∂β is zero
         x = SAT_STATE() 
+        d = DIODES()
         t = Epoch(2020, 5, 4)
         sᴵ = SVector{3, Float64}(sun_position(t))
         pos = random_pose()
         alb = get_albedo(2)
-        Is, Hi = Estimator.current_measurement(x, sᴵ, pos, alb)
+        Is, Hi =  current_measurement(x, d, sᴵ, pos, alb)
         @test all(Hi[:, 4:6] .== 0.0)
         @test all(Hi[Is .== 0.0, :] .== 0.0)
 
         x = SAT_STATE() 
+        d = DIODES()
         t = Epoch(2020, 5, 4)
         sᴵ = SVector{3, Float64}(sun_position(t))
         random_pose
-        Is, Hi = Estimator.current_measurement(x, sᴵ, pos, alb; use_albedo = false)
+        Is, Hi =  current_measurement(x, d, sᴵ, pos, alb; use_albedo = false)
         @test all(Hi[:, 4:6] .== 0.0)
         @test all(Hi[Is .== 0.0, :] .== 0.0)
 
@@ -487,18 +499,19 @@
         ts = zeros(Nt)
         for i = 1:Nt
             x = SAT_STATE() 
+            d = DIODES()
             t = Epoch(2020, 5, 4)
             sᴵ = SVector{3, Float64}(sun_position(t))
             pos = random_pose()
             alb = get_albedo(1)
 
-            Is_new, H_new = Estimator.current_measurement(x, sᴵ, pos, alb; calibrate_diodes = true, use_albedo = true)
+            Is_new, H_new =  current_measurement(x, d, sᴵ, pos, alb; calibrate_diodes = true, use_albedo = true)
 
-            xVec = vectrify(x)
+            xVec = vectrify(x, d)
             xVec[1:4] .= [xVec[2:4]; xVec[1]]
             Is_old, H_old = current_measurement_old(xVec, (sᴵ / norm(sᴵ)), 6, pos, t, alb)
 
-            ts[i] = (Is_new ≈ Is_old) && (H_new  ≈ H_old)
+            ts[i] = (Is_new ≈ (Is_old / norm(Is_old))) && (H_new  ≈ H_old)
         end
         @test all(ts .== 1)
 
@@ -594,11 +607,12 @@
         alb = get_albedo(2)
         for i = 1:Nₜ
             x = SAT_STATE() 
+            d = DIODES()
             t = Epoch(2020, 5, 4)
             sᴵ = SVector{3, Float64}(sun_position(t))
             pos = random_pose()
-            Is, Hi = Estimator.current_measurement(x, sᴵ, pos, alb; calibrate_diodes = true)
-            xVec = vectrify(x)
+            Is, Hi =  current_measurement(x, d, sᴵ, pos, alb; calibrate_diodes = true)
+            xVec = vectrify(x, d)
             Is2, Hi2 = current_measurement_vec(xVec, sᴵ, pos, alb)
             ts[i] = (Is ≈ Is2) && (Hi ≈ Hi2)
         end 
@@ -609,11 +623,12 @@
         _current_measurement_vec(_x) = current_measurement_vec(_x, sᴵ, pos, alb; calibrate_diodes = true, use_albedo = false)[1];  # Only want Is
 
         x = SAT_STATE() 
+        d = DIODES()
         t = Epoch(2020, 5, 4)
         sᴵ = SVector{3, Float64}(sun_position(t))
         pos = random_pose()
-        Is, Hi = Estimator.current_measurement(x, sᴵ, pos, alb; calibrate_diodes = true, use_albedo = false)
-        H_diff = ForwardDiff.jacobian(_current_measurement_vec, vectrify(x))
+        Is, Hi =  current_measurement(x, d, sᴵ, pos, alb; calibrate_diodes = true, use_albedo = false)
+        H_diff = ForwardDiff.jacobian(_current_measurement_vec, vectrify(x, d))
        
         E(q) = [G(q)   zeros(4, 21);
                 zeros(21, 3)   I(21) ];
@@ -624,25 +639,25 @@
         @test H_diff_adj[:, 1:3] ≈ 2 * Hi[:, 1:3]
 
         @test H_diff_adj[:, 4:end] ≈ Hi[:, 4:end]
-    end
-
+    end;
 
     # Not really sure how to test this
     @testset "Sqrt MEKF" begin 
 
         # LOTS of data to prep
         x = SAT_STATE(; ideal = true)
+        d = DIODES(; ideal = true)   # NOTE this 'ideal' assumes the 45* rotation so ±Z isnt unobservable
         σq = deg2rad(10); σβ = deg2rad(10)
         Σϕ = diagm( σq * ones(3) )  
         Σβ = diagm( σβ * ones(3) )
-        Σ  = zeros(6, 6)
+        Σ  = I(6)
         Pchol = SAT_COVARIANCE(Σϕ, Σβ, Σ, Σ, Σ).Σ[1:6, 1:6]
 
         alb = get_albedo(2)
         Bᴵ  = SVector{3, Float64}(randn(3))
         sᴵ  = SVector{3, Float64}(AU * [1.0, 0.0, 0.0])
         B̃ᴮ  = Bᴵ 
-        Ĩ   = SVector{6, Float64}(1, 0, 0, 0, 0, 0) # Should be all zeros because of eclipse, but that isnt checked for 
+        Ĩ   = SVector{6, Float64}(sqrt(2)/2, 0, 0, 0, sqrt(2)/2, 0) # Should be all zeros because of eclipse, but that isnt checked for 
         pos = SVector{3, Float64}(6.871e6 * [-1.0, 0.0, 0.0])
         dt = 1.0
         ω   = SVector{3, Float64}(zeros(3))
@@ -660,21 +675,22 @@
         V = Diagonal( [σ_mag * ones(3); σ_sun * ones(N)].^2 )
         Vchol = chol(Matrix(V))
 
-        x⁺, Pchol⁺ = Estimator.sqrt_mekf(x, Pchol, alb, ω, Bᴵ, sᴵ, B̃ᴮ, Ĩ, pos, dt, Wchol, Vchol; calibrate_diodes = false);
+        x⁺, d⁺, Pchol⁺ =  sqrt_mekf(x, d, Pchol, alb, ω, Bᴵ, sᴵ, B̃ᴮ, Ĩ, pos, dt, Wchol, Vchol; calibrate_diodes = false);
 
         # No spin, so quat should be the same 
         @test x⁺.q ≈ x.q  atol = 1e-14
         @test x⁺.β ≈ x.β  atol = 1e-14
-        @test x⁺.C == x.C   # These three should be untouched
-        @test x⁺.α == x.α 
-        @test x⁺.ϵ == x.ϵ
+        @test d⁺.calib_values == d.calib_values   # These three should be untouched
+        @test d⁺.azi_angles == d.azi_angles 
+        @test d⁺.elev_angles == d.elev_angles
 
         @test norm(Pchol) > norm(Pchol⁺)  # Because our measurements and dynamics match
     end
 
     @testset "Estimate" begin 
         x = SAT_STATE(; ideal = true )
-        sat = SATELLITE(; sta = x)
+        d = DIODES(; ideal = true)  # Assumes `ideal` is with 45* rotation (affects Ĩ )
+        sat = SATELLITE(; sta = x, dio = d)
         alb = get_albedo(2) 
         t   = Epoch(2021, 5, 2)
         dt  = 1.0
@@ -682,7 +698,7 @@
         sᴵ  = SVector{3, Float64}(sun_position(t))
         pos = SVector{3, Float64}(6.871e6 * [-1.0, 0.0, 0.0])
         B̃ᴮ  = SVector{3, Float64}(IGRF13(pos, t))
-        Ĩ   = SVector{6, Float64}(0.74376, 0.0, 0.61329, 0.0, 0.26589, 0.0) # Computed beforehand 
+        Ĩ   = SVector{6, Float64}(0.3379, 0.0, 0.61329, 0.0, 0.71393, 0.0) # Computed beforehand 
         dt = 1.0
         ω   = SVector{3, Float64}(zeros(3))
         N = 6
@@ -702,7 +718,7 @@
         sens = SENSORS(B̃ᴮ, Ĩ, ω, pos)
         data = MEKF_DATA(Wchol, Vchol)
 
-        sat⁺ = Estimator.estimate(sat, sens, data, alb, t, dt; calibrate_diodes = false);
+        sat⁺ =  estimate(sat, sens, data, alb, t, dt; calibrate_diodes = false);
 
         @test sat.covariance !== sat⁺.covariance   # Make sure we have the right copy
         @test sat.state   !==  sat⁺.state
@@ -712,14 +728,15 @@
         @test sat.magnetometer == sat⁺.magnetometer 
 
         cov = sat.covariance; cov⁺ = sat⁺.covariance 
-        state = sat.state; state⁺ = state⁺ = sat⁺.state
+        state = sat.state; state⁺ = sat⁺.state
+        diodes = sat.diodes; diodes⁺ = sat⁺.diodes
         @test cov[1:6, 1:6]  ≉ cov⁺[1:6, 1:6]
         @test cov[7:end, 7:end] ≈ cov⁺[7:end, 7:end]
         @test norm(cov) > norm(cov⁺)
 
-        @test state.C == state⁺.C 
-        @test state.α == state⁺.α 
-        @test state.ϵ == state⁺.ϵ 
+        @test diodes.calib_values == diodes⁺.calib_values 
+        @test diodes.azi_angles == diodes⁺.azi_angles
+        @test diodes.elev_angles == diodes⁺.elev_angles 
         @test state.q ≈ state⁺.q  atol = 1e-5 # Because guess was right
         @test state.β ≈ state⁺.β  atol = 1e-5 # Because guess was right 
 
@@ -728,10 +745,9 @@
         #### TRIAL 2, with slightly not ideal
         q = [1.1, 0.05, 0.1, 0.05]; q = SVector{4, Float64}(q / norm(q))
         β = SVector{3, Float64}(0.1, -0.1, 0.05)
-        x = SAT_STATE(; q = q, β = β, C = SVector{6, Float64}(ones(6)), 
-                        α = SVector{6, Float64}(0.0, deg2rad(180), deg2rad(90), deg2rad(-90), 0.0, 0.0), 
-                        ϵ = SVector{6, Float64}(0.0, 0.0, 0.0, 0.0, deg2rad(90), deg2rad(-90)))
-        sat = SATELLITE(; sta = x)
+        x = SAT_STATE(; q = q, β = β)
+        d = DIODES(; ideal = true) 
+        sat = SATELLITE(; sta = x, dio = d)
         alb = get_albedo(2) 
         t   = Epoch(2021, 12, 2)
         dt  = 1.0
@@ -739,7 +755,7 @@
         sᴵ  = SVector{3, Float64}(sun_position(t))
         pos = SVector{3, Float64}(6.871e6 * [0.0, 0.0, -1.0])
         B̃ᴮ  = SVector{3, Float64}((IGRF13(pos, t)))
-        Ĩ   = SVector{6, Float64}(0.0, 0.441, 0.0, 0.979, 0.0, 0.374) # Computed beforehand, with some noise
+        Ĩ   = SVector{6, Float64}(0.1228, 0.2411, 0.0, 0.9812, 0.0, 0.5117) # Computed beforehand, with some noise
         dt = 2.0
         ω   = SVector{3, Float64}([0.1, -0.1, 0.2])
         N = 6
@@ -747,29 +763,29 @@
         sens = SENSORS(B̃ᴮ, Ĩ, ω, pos)
         data = MEKF_DATA()
 
-        sat⁺ = Estimator.estimate(sat, sens, data, alb, t, dt; calibrate_diodes = false);
+        sat⁺ =  estimate(sat, sens, data, alb, t, dt; calibrate_diodes = false);
 
         @test sat.covariance !== sat⁺.covariance   # Make sure we have the right copy
         @test sat.state   !==  sat⁺.state
 
         @test sat.J == sat⁺.J 
-        @test sat.diodes == sat⁺.diodes 
+        @test (sat.diodes == sat⁺.diodes) # && (sat.diodes !== sat⁺.diodes)
         @test sat.magnetometer == sat⁺.magnetometer 
 
         cov = sat.covariance; cov⁺ = sat⁺.covariance 
         state = sat.state; state⁺ = state⁺ = sat⁺.state
+        diodes = sat.diodes; diodes⁺ = sat⁺.diodes
         @test cov[1:6, 1:6]  ≉ cov⁺[1:6, 1:6]
         @test cov[7:end, 7:end] ≈ cov⁺[7:end, 7:end]
-        @test norm(cov) > norm(cov⁺)
+        # @test norm(cov) > norm(cov⁺)
 
-        @test state.C == state⁺.C 
-        @test state.α == state⁺.α 
-        @test state.ϵ == state⁺.ϵ 
+        @test diodes.calib_values == diodes⁺.calib_values 
+        @test diodes.azi_angles == diodes⁺.azi_angles 
+        @test diodes.elev_angles == diodes⁺.elev_angles 
 
         @test state.q ≉ state⁺.q  atol = 1e-6 # Because guess was not quite right
         @test state.β ≉ state⁺.β  atol = 1e-6 # Because guess was not quite right
         
-
 
         # TRIAL 3 with garbage values
         sat = SATELLITE()
@@ -787,7 +803,7 @@
         sens = SENSORS(B̃ᴮ, Ĩ, ω, pos)
         data = MEKF_DATA()
 
-        sat⁺ = Estimator.estimate(sat, sens, data, alb, t, dt; calibrate_diodes = false);
+        sat⁺ =  estimate(sat, sens, data, alb, t, dt; calibrate_diodes = false);
 
         @test sat.covariance !== sat⁺.covariance   # Make sure we have the right copy
         @test sat.state   !==  sat⁺.state
@@ -798,11 +814,12 @@
 
         cov = sat.covariance; cov⁺ = sat⁺.covariance 
         state = sat.state; state⁺ = sat⁺.state
+        diodes = sat.diodes; diodes⁺ = sat⁺.diodes
         @test cov[7:end, 7:end] ≈ cov⁺[7:end, 7:end]
        
-        @test state.C == state⁺.C 
-        @test state.α == state⁺.α 
-        @test state.ϵ == state⁺.ϵ 
+        @test diodes.calib_values == diodes⁺.calib_values 
+        @test diodes.azi_angles == diodes⁺.azi_angles
+        @test diodes.elev_angles == diodes⁺.elev_angles 
 
 
 
@@ -824,12 +841,12 @@
         angle_random_walk     = 0.06
         σ_gyro = deg2rad(gyro_bias_instability) / 3600.0  # Convert (deg/hour) to (rad/sec)
         σ_bias = deg2rad(angle_random_walk) / 60.0        # Convert (deg/sqrt(hour)) to ( rad/sqrt(s) )
-        σ_sun = deg2rad(3.0);
-        σ_mag = deg2rad(3.0);
+        σ_mag = deg2rad(2.0);
+        σ_cur = 0.1;
 
         W = Diagonal( [σ_gyro * ones(3); σ_bias * ones(3)].^2 )
         Wchol = chol(Matrix(W)) 
-        V = Diagonal( [σ_mag * ones(3); σ_sun * ones(N)].^2 )
+        V = Diagonal( [σ_mag * ones(3); σ_cur * ones(N)].^2 )
         Vchol = chol(Matrix(V))
 
         sens = SENSORS(B̃ᴮ, Ĩ, ω, pos)
@@ -837,22 +854,23 @@
         @test data.Wchol[1:6, 1:6] == Wchol
         @test data.Vchol == Vchol
       
-        sat⁺ = Estimator.estimate(sat, sens, data, alb, t, dt; calibrate_diodes = true);
+        sat⁺ =  estimate(sat, sens, data, alb, t, dt; calibrate_diodes = true);
 
         @test sat.covariance !== sat⁺.covariance   # Make sure we have the right copy
         @test sat.state   !==  sat⁺.state
 
         @test sat.J == sat⁺.J 
-        @test sat.diodes == sat⁺.diodes 
+        @test sat.diodes != sat⁺.diodes 
         @test sat.magnetometer == sat⁺.magnetometer 
 
         cov = sat.covariance; cov⁺ = sat⁺.covariance 
         state = sat.state; state⁺ = sat⁺.state
+        diodes = sat.diodes; diodes⁺ = sat⁺.diodes
         @test cov[7:end, 7:end] ≉ cov⁺[7:end, 7:end]
         
-        @test state.C != state⁺.C 
-        @test state.α != state⁺.α 
-        @test state.ϵ != state⁺.ϵ 
+        @test diodes.calib_values != diodes⁺.calib_values 
+        @test diodes.azi_angles != diodes⁺.azi_angles
+        @test diodes.elev_angles != diodes⁺.elev_angles 
 
 
 
@@ -868,7 +886,8 @@
         sᴵ  = SVector{3, Float64}(sun_position(t))
         pos = SVector{3, Float64}(6.871e6 * [-1.0, 0.0, 0.0])
         B̃ᴮ  = SVector{3, Float64}(IGRF13(pos, t))
-        Ĩ   = SVector{6, Float64}(0.74376, 0.0, 0.61329, 0.0, 0.26589, 0.0) # Computed beforehand 
+        Ĩ, _ = current_measurement(x, sat.diodes, sᴵ, pos, alb; use_albedo = true, calibrate_diodes = false)
+        Ĩ   = SVector{6, Float64}(Ĩ)
         dt = 1.0
         ω   = SVector{3, Float64}(zeros(3))
         N = 6
@@ -876,25 +895,26 @@
         sens = SENSORS(B̃ᴮ, Ĩ, ω, pos)
         data = MEKF_DATA()
 
-        sat⁺ = Estimator.estimate(sat, sens, data, alb, t, dt; calibrate_diodes = true)
+        sat⁺ =  estimate(sat, sens, data, alb, t, dt; calibrate_diodes = true)
 
         @test sat.covariance !== sat⁺.covariance   # Make sure we have the right copy
         @test sat.state   !==  sat⁺.state
 
         @test sat.J == sat⁺.J 
-        @test sat.diodes == sat⁺.diodes 
+        # @test (sat.diodes == sat⁺.diodes) && (sat.diodes !== sat⁺.diodes) 
         @test sat.magnetometer == sat⁺.magnetometer 
 
         cov = sat.covariance; cov⁺ = sat⁺.covariance 
-        state = sat.state; state⁺ = state⁺ = sat⁺.state
+        state = sat.state; state⁺ = sat⁺.state
+        diodes = sat.diodes; diodes⁺ = sat⁺.diodes
 
         @test cov[1:6, 1:6]  ≉ cov⁺[1:6, 1:6]
         @test cov[7:end, 7:end] ≉ cov⁺[7:end, 7:end]
         # @test norm(cov) > norm(cov⁺)
 
-        @test state.C ≈ state⁺.C atol = 1e-3
-        @test state.α ≈ state⁺.α atol = 1e-3 
-        @test state.ϵ ≈ state⁺.ϵ atol = 1e-3 
+        @test diodes.calib_values ≈ diodes⁺.calib_values atol = 1e-3
+        @test diodes.azi_angles ≈ diodes⁺.azi_angles atol = 1e-3 
+        @test diodes.elev_angles ≈ diodes⁺.elev_angles atol = 1e-3 
         @test state.q ≈ state⁺.q atol = 1e-3   
         @test state.β ≈ state⁺.β atol = 1e-3    
     end
@@ -904,187 +924,94 @@
         sat.covariance .= sat.covariance * sat.covariance
         cov₀ = deepcopy(sat.covariance)
 
-        Estimator.reset_cov!(sat; reset_calibration = false);
+         reset_cov!(sat; reset_calibration = false);
         @test cov₀ != sat.covariance
 
         sat = SATELLITE()
         sat.covariance .= sat.covariance * sat.covariance
         cov₀ = deepcopy(sat.covariance)
 
-        Estimator.reset_cov!(sat; reset_calibration = true);
+         reset_cov!(sat; reset_calibration = true);
         @test cov₀ != sat.covariance
     end
 end
 
 
 
+"""
+    @testset "Attempt to figure out A in Pred..." begin 
+        # FD-able version
+        function prediction_FD(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate_diodes::Bool = true) where {T}
 
-# @testset "Attempt to figure out A in Pred..." begin 
+            function nextq(q, ω, β)
+                # Generate axis-angle representation
+                γ  = ω - β     # Corrected angular velocity 
+                nγ = norm(γ)     # Magnitude of corrected angular velocity 
+            
+                # Predict next orientation (as a quaternion)
+                r  = γ / nγ       # Unit axis of rotation
+                θ  = nγ * dt      # Angular rotaation about unit axis
+                q⁺ = (nγ == 0.0) ?  q :
+                                    qmult(q, [cos(θ / 2); r*sin(θ / 2)])
 
-#     # Purely for testing ForwardDiff
-#     function prediction(x, ω::SVector{3, T}, dt::T) where {T}
+                return q⁺, γ, nγ
+            end
 
-#         q = x[1:4]
-#         β = x[5:7]
+            q⁺, γ, nγ = nextq(x.q, ω, x.β)
 
-#         # Generate axis-angle representation
-#         γ  = ω - β     # Corrected angular velocity 
-#         nγ = norm(γ)     # Magnitude of corrected angular velocity 
-
-#         # Predict next orientation (as a quaternion)
-
-#         if nγ ≈ 0.0  # Avoid divide-by-zero error
-#             A = [I(3)           -dt * I(3);    # Jacobian of f(x) wrt x
-#                 zeros(3, 3)          I(3)]
-#             return x, A
-#         end
-
-#         r = γ / nγ       # Unit axis of rotation
-#         θ = nγ * dt      # Angular rotaation about unit axis
-#         q⁺ = qmult(q, [cos(θ / 2); r*sin(θ / 2)])  # <- right side is axis-angle to unit quaternion
-#         x⁺ = [q⁺; β]
-
-#         # Calculate Jacobian ∂f/∂x
-#         γ̂ = -hat(γ / nγ)  # Skew-symmetric matrix 
-#         R = I(3) + (γ̂ ) *sin(nγ * dt) + ((γ̂ )^2) * (1 - cos(nγ * dt)); # Rodrigues formula 
-#         A = [R           -dt * I(3);    # Jacobian of f(x) wrt x
-#             zeros(3, 3)       I(3)]
-
-#         return x⁺, A
-#     end;
-
-#     function prediction_old(x, w, dt)
-#         """
-#             Predicts the next state and covariance using current state, angular velocity, and time step
-#                 (essentially assumes a small rotation in attitude and that the other states are constant)
-
-#             Arguments:
-#                 - x:  Current state of the satellite [(q⃗, q₀) β C α ϵ]              | [7 + 3i,] 
-#                 - w:  Current angular velocity estimate of the satellite            | [3,]
-#                 - dt: Time step of the Simulation                                         |  Int
-
-#             Returns:
-#                 - xn: Predicted next state  [(q⃗, q₀) β C α ϵ]                       | [7 + 3i,] 
-#                 - H:  Jacobian of state x with respect to itself                    |  [i x 6 + 3i]
-#                         (Note that the quaternions have been replaced with 3 param)
-#                             dx/dx = [dϕ/dϕ; dϕ/dβ; ...]                             
-#         """
-#         q = x[1:4]; # Quaternion portion
-#         β = x[5:7]; # Bias portion
-
-#         γ = w - β;     # Adjusted angular velocity (w - biases)
-#         nγ = norm(γ)
-
-#         θ = (nγ*dt);  
-#         r = γ/nγ;  # Make unit
-
-#         qp = qmult(q, [cos(θ/2); r*sin(θ/2)]) #; cos(θ/2)]); 
+            x⁺ = update_state(x; q = q⁺)  # Doesn't matter if we are calibrating diodes, only q changes in prediction
         
-#         skew = -hat(γ)
+            # Calculate Jacobian ∂f/∂x
+        
+            γ̂ = -hat(γ / nγ)  # Skew-symmetric matrix 
+            R = (nγ == 0.0) ? I(3)  :  # Avoid the divide-by-zero error
+                            I(3) + (γ̂ ) * sin(nγ) + ((γ̂ )^2) * (1 - cos(nγ)); # Rodrigues formula
 
-#         R = (I(3) + (skew/nγ)*sin(nγ*dt) + ((skew/nγ)^2)*(1 - cos(nγ*dt)));     # Rodrigues (for matrix exponential?)
-
-#         A = [R -dt*I(3); zeros(3,3) I(3)]; # Jacobian of f(x)
-
-#         xn = [qp; β]  # x at next step
-
-#         return xn, A
-#     end
-
-#     # could use getfield + fieldnames
-#     function vectorfy(x::SAT_STATE{N, T}) where {N, T}
-#         v = zeros(T, 25)
-#         v[1:4]  .= x.q
-#         v[5:7]  .= x.β 
-#         v[8:13] .= x.C 
-#         v[14:19] .= x.α
-#         v[20:25] .= x.ϵ
-
-#         # return SVector{25, T}(v)
-#         return v
-#     end
-
-#     x = SAT_STATE()
-#     ω = SVector{3, Float64}(randn(3))
-
-#     dt = 1.0
-#     x⁺, A = prediction(x, ω, dt)
-
-#     # Verify actual prediciotn matches this temp version 
-#     x⁺ₜ, Aₜ = prediction(vectorfy(x), ω, dt)
-#     @test vectorfy(x⁺)[1:7] ≈ x⁺ₜ
-#     @test A ≈ Aₜ
-
-    # # Verify temp version matches old version 
-    # x1, A1 = prediction(vectorfy(x), ω, dt)
-    # x2, A2 = prediction_old(vectorfy(x), ω, dt)
-    # @test x1 ≈ x2 
-    # @test A1 ≈ A2
-
-    # _prediction(_x) = prediction(_x, ω, dt)[1]  # wrt x only, and dont want A
-    # Afd = ForwardDiff.jacobian(_prediction, vectorfy(x)[1:7])
-
-    # _prediction_old(_x) = prediction_old(_x, ω, dt)[1]
-    # Afd_old = ForwardDiff.jacobian(_prediction_old, vectorfy(x)[1:7])
-    # @test Afd ≈ Afd_old
-
-    # # Use the attitude jacobian to map from [4 x 4] to [3 x 3]
-    # E⁻ = [G(x.q)      zeros(4, 3);  # Maps from 3 (previous time step) -> 4
-    #     zeros(3, 3)        I(3) ]
-    # E⁺ = [G(x⁺.q)     zeros(4, 3);  # Maps from 4 -> 3 (next time step)
-    #     zeros(3, 3)        I(3) ]
-
-    # Afd_adj = E⁺' * Afd * E⁻
-
-    # # DIDNT WORK. TRY THIS?
-    # function dynamics(J, x)
-#         q = x[1:4]
-#         ω = x[5:7]
-#         q̇ = 0.5 * L(q) * H * ω 
-#         ω̇ = J \ (-cross(ω, J * ω))
-
-#         return [q̇; ω̇ ]
-#     end
-
-#     function qRK4(J, x, h)
-#         k₁ = h * dynamics(J, x)
-#         k₂ = h * dynamics(J, x + (k₁ / 2.0))
-#         k₃ = h * dynamics(J, x + (k₂ / 2.0))
-#         k₄ = h * dynamics(J, x + k₃)
-
-#         x⁺ = x + (1/6) * (k₁ + 2 * k₂ + 2 * k₃ + k₄)
-
-#         return x⁺ / norm(x⁺)
-#     end
-
-#     J = [0.2 0.0 0.0; 0.0 0.2 0.0; 0.0 0.0 0.2]
-#     q₁ = randn(4); q₁ /= norm(q₁) 
-#     ω₁ = 0.1 * randn(3)
-#     dt = 0.1
-
-#     tt = qRK4(J, [q₁; ω₁], dt)
-#     q₂, ω₂ = tt[1:4], tt[5:7]
-
-#     x = [q₁; zeros(3)]
-#     ω = SVector{3, Float64}(ω₁)
-
-#     _prediction(_x) = prediction(_x, ω, dt)[1]
-#     _prediction_old(_x) = prediction_old(_x, ω, dt)[1]
-#     A_diff = ForwardDiff.jacobian(_prediction, x)
-#     x⁺, A_cust = prediction(x, ω, dt)
-
-#     q₁ = SVector{4, Float64}(q₁)
-#     q₂ = SVector{4, Float64}(q₂)
-#     E⁻ = [G(q₁)      zeros(4, 3);  # Maps from 3 (previous time step) -> 4
-#           zeros(3, 3)       I(3) ]
-#     E⁺ = [G(q₂)     zeros(4, 3);  # Maps from 4 -> 3 (next time step)
-#           zeros(3, 3)        I(3) ]
-
-#     Afd_adj = E⁺' * A_diff * E⁻
+            @debug R == exp(nγ * hat(γ / nγ) )
+                            
+            A = zeros(T, 6, 6)     # Jacobian of f(x) wrt x,   A  =   [R   -dt I₃;  0₃  I₃]
 
 
-#     q₂_exp_cust = q₁ + (G(q₂) * A_cust[1:3, 1:3] * G(q₁)') * (0.5 * L(q₁) * H * ω)
-#     q₂_exp_diff = q₁ + A_diff[1:4, 1:4] * (0.5 * L(q₁) * H * ω)
+            _nextq_q(_q) = nextq(_q, ω, x.β)[1]
+            _nextq_β(_β) = nextq(x.q, ω, _β)[1]
 
-# end
+            q⁺ₐ = Array(q⁺) # To prevent FD from somehow overwriting q⁺...
+            A[1:3, 1:3] .= attitude_jacobian(q⁺ₐ)' * ForwardDiff.jacobian(_nextq_q, x.q) * attitude_jacobian(x.q)   # df/dq with Attitude Jacobian 
+            A[1:3, 4:6] .= attitude_jacobian(q⁺ₐ)' * ForwardDiff.jacobian(_nextq_β, x.β) 
+            # A[1:3, 1:3] .= R 
+            # A[1:3, 4:6] .= -dt * I(3) 
+            A[4:6, 4:6] .= I(3)
+            # A[4:6, 1:3] .= zeros(3, 3)
+        
+            
+            if calibrate_diodes
+                # Add in additional states if calibrating (i.e., x = [q, β, C, α, ϵ])
+                Ac = zeros(T, 6 + 3 * N, 6 + 3 * N)  # Ac = [A  0; 0 I]
+                Ac[1:6, 1:6] .= A 
+                Ac[7:end, 7:end] .= I(3 * N)
+                
+                return x⁺, Ac
+            else
+                return x⁺, A
+            end
+        end;
 
+        function attitude_jacobian(q)
+            G = [-q[2:4]' ; 
+                q[1] * I + hat(q[2:4])]
+            return SMatrix{4, 3, Float64, 12}(G)
+        end
+
+        # MAKE SURE THE x⁺ MATCH
+        x = SAT_STATE()
+        ω = SVector{3, Float64}(randn(3))
+        N = 6 
+        dt = 0.1 
+
+        xpred_fd, A_fd = prediction_FD(x, ω, dt, N; calibrate_diodes = false)
+        xpred_og, A_og = prediction(x, ω, dt, N; calibrate_diodes = false)
+        @test xpred_fd == xpred_og
+        @test A_fd ≈ A_og
+
+    end
+"""
