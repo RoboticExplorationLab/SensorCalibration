@@ -5,7 +5,7 @@
  - A (in prediction) does not appear to be correct..., and maybe Hb and Hi, too
  - current_measurement is slow (~ ms)
 
- - Read up on IMU stuff to get a fill for the noise W and V and general covariance stuff
+ - Read up on IMU stuff to get a fill for the noise W and V (I have no idea..) and general covariance stuff 
  - Read up on setting initial covariances too
 
  - unit for Bᴵ, Bᴮ, Ĩ, etc...?
@@ -33,8 +33,8 @@ struct MEKF_DATA{T}
         new{T}(Wchol, Vchol)
     end
 
-    function MEKF_DATA(; N = 6, σ_sun = deg2rad(3.0), σ_mag = deg2rad(3.0),
-                            σC = 0.1, σα = deg2rad(3.), σϵ = deg2rad(3.),  # Was 0.1, 3, 3
+    function MEKF_DATA(; N = 6, σ_mag = deg2rad(2.0), σ_cur = 0.1,
+                            σC = 1e-4, σα = deg2rad(0.01), σϵ = deg2rad(0.01),  # Was 0.1, 3, 3
                             gyro_bias_instability = 0.8,   # in deg/hour  
                             angle_random_walk     = 0.06)  # in deg/sqrt(hour)
 
@@ -48,7 +48,7 @@ struct MEKF_DATA{T}
         Wchol = chol(Matrix(W)) 
         
         ## Measurement Noise:
-        V = Diagonal( [σ_mag * ones(3); σ_sun * ones(N)].^2 )
+        V = Diagonal( [σ_mag * ones(3); σ_cur * ones(N)].^2 )
         Vchol = chol(Matrix(V))
     
         MEKF_DATA(Wchol, Vchol)
@@ -70,13 +70,17 @@ end
     Note that this covariance uses 3 parameters for the attitude to prevent dropping rank.
 """
 function reset_cov!(sat::SATELLITE{N, T}; reset_calibration = false, σϕ = deg2rad(10), σβ = deg2rad(10), 
-                        σC = 0.1, σα = deg2rad(3), σϵ = deg2rad(3)) where {N, T}
+                        σC = 0.3, σα = deg2rad(9), σϵ = deg2rad(9)) where {N, T}
+                        # σC = 0.1, σα = deg2rad(3), σϵ = deg2rad(3)) where {N, T}
     
+    @info "Calling reset cov!"
     # # Update Covariances 
     # Reset q, increase β, pass C, α, and ϵ
     Σϕ = diagm( σϕ * ones(3) )  # Reset (remember this is Cholesky so no σ²)
     Σβ = 1.5 * sat.covariance[4:6, 4:6]    # Increase a bit due to unknown propagation in eclipse
     
+    # NEED TO CHOLESKY THIS !!!
+
     sat.covariance[1:3, 1:3] .= Σϕ
     sat.covariance[4:6, 4:6] .= Σβ
 
@@ -161,7 +165,6 @@ end
 # Does having Bᴮ not be unit give it heavy weighting bias or is that taken care of with L?
 """
     sqrt_mekf(x, Pchol, alb, ω, Bᴵ, sᴵ, B̃ᴮ, Ĩ, pos, dt, W, V; E_am₀ = 1366.9, use_albedo = true, calibrate_diodes = true)
-
     
 """
 function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb::ALBEDO, 
@@ -171,8 +174,10 @@ function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb:
     
 
     # Prediction 
-    # x_pred, A = prediction(x, ᴵQᴮ * (ω - x.β) + x.β, dt, N; calibrate_diodes = false)
     x_pred, A = prediction(x, ω, dt, N; calibrate_diodes = calibrate_diodes)
+    
+    # P = Pchol' * Pchol     #####
+    # Pp = A * P * A' + W    #####
     Pchol_pred = qrᵣ([Pchol * A'; W])  # Update covariance (as Cholesky)
 
     # Measurement 
@@ -183,32 +188,48 @@ function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb:
     # Innovation 
     z = [(B̃ᴮ / norm(B̃ᴮ)) - Bᴮ_exp; (Ĩ / norm(Ĩ)) - I_exp]
 
-    H_mag *= 2 
-    H_cur[:, 1:3] *= 2
+    # H_mag *= 2 
+    # H_cur[:, 1:3] *= 2
     H = [H_mag; H_cur]
 
     # Kalman Gain (how much we trust the measurement over the dynamics)
     Pchol_yy = qrᵣ([Pchol_pred * H'; V])
     L = (((Pchol_pred' * Pchol_pred * H') / Pchol_yy) / Pchol_yy')
+    # ^ the above is the same as Pp * H' * inv(Pyy), for non-sqrt
+
+    # S = H * Pp * H' + V   #Pyy
+    # L = Pp * H' * inv(S)
+
 
     # Update 
     x⁺, diodes⁺ = update(x_pred, diodes, L, z; calibrate_diodes = calibrate_diodes) 
     Pchol⁺ = qrᵣ([ Pchol_pred * (I - L * H)'; V * L']); 
 
+    # P⁺ = Pp - L * H * Pp # (I - L * H) * Pp * (I - L * H) + L * V * L'
+    # Pchol⁺_alt = chol(P⁺)
+    # Pchol⁺ = Pchol⁺_alt
+
     @debug (norm(Pchol) < norm(Pchol_pred)) && (norm(Pchol) > norm(Pchol⁺))  # Goes up with prediction, down with measurement
 
-    # #### REMOVE ! 
+    # # #### REMOVE ! 
     # θ_err = acos( (Bᴮ_exp / norm(Bᴮ_exp))' * (B̃ᴮ / norm(B̃ᴮ)) )
-    # nP   = norm(Pchol)
-    # nPp  = norm(Pchol_pred)
-    # nP⁺  = norm(Pchol⁺)
-    # nPd  = norm(Pchol[7:end, 7:end])
-    # nP⁺d = norm(Pchol⁺[7:end, 7:end])
-    # @debug (x_pred !== x) && (x⁺ !== x_pred)
-    # @debug (Pchol !== Pchol_pred) && (Pchol_pred !== Pchol⁺)
+
+    nP   = norm(Pchol)
+    nPp  = norm(Pchol_pred)
+    nP⁺  = norm(Pchol⁺)
+    nPd  = norm(Pchol[7:end, 7:end])
+    nP⁺d = norm(Pchol⁺[7:end, 7:end])
+    @debug (x_pred !== x) && (x⁺ !== x_pred)
+    @debug (Pchol !== Pchol_pred) && (Pchol_pred !== Pchol⁺)
+
+    # Diode debugging 
+    nC⁻ = norm(diodes.calib_values - ones(6))
+    nC⁺ = norm(diodes⁺.calib_values - ones(6))
+    nα⁻ = norm(diodes.azi_angles .- [0.0;      pi;     (pi/2); (-pi/2); 0.0;    pi])
+    nα⁺ = norm(diodes⁺.azi_angles .- [0.0;      pi;     (pi/2); (-pi/2); 0.0;    pi])
 
     # @infiltrate
-    # #########
+    # # #########
 
     return x⁺, diodes⁺, Pchol⁺
 end
@@ -234,8 +255,8 @@ function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate
     # q⁺ = (nγ == 0.0) ? x.q :
     #                    qmult([cos(θ / 2); r*sin(θ / 2)], x.q, )  # <- left side is axis-angle to unit quaternion
 
-
-    @assert (norm(q⁺) ≈ 1.0) "Unit quaternion isn't unit!"    
+    (norm(q⁺) ≉ 1.0) && @infiltrate
+    # @assert (norm(q⁺) ≈ 1.0) "Unit quaternion isn't unit!"    
     x⁺ = update_state(x; q = q⁺)  # Doesn't matter if we are calibrating diodes, only q changes in prediction
 
     # Calculate Jacobian ∂f/∂x
@@ -270,9 +291,11 @@ end;
             q[1] * I + hat(q[2:4])]
         return SMatrix{4, 3, Float64, 12}(G)
     end
+
+    # Should I have θ = nγ * dt or just nγ? (both, according to class notes)
     function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate_diodes::Bool = true) where {T}
 
-        function nextq(q, ω, β)
+        function nextq(q, ω, β, dt)
             # Generate axis-angle representation
             γ  = ω - β     # Corrected angular velocity 
             nγ = norm(γ)     # Magnitude of corrected angular velocity 
@@ -286,7 +309,7 @@ end;
             return q⁺, γ, nγ
         end
 
-        q⁺, γ, nγ = nextq(x.q, ω, x.β)
+        q⁺, γ, nγ = nextq(x.q, ω, x.β, dt)
 
         x⁺ = update_state(x; q = q⁺)  # Doesn't matter if we are calibrating diodes, only q changes in prediction
 
@@ -301,8 +324,8 @@ end;
         A = zeros(T, 6, 6)     # Jacobian of f(x) wrt x,   A  =   [R   -dt I₃;  0₃  I₃]
 
 
-        _nextq_q(_q) = nextq(_q, ω, x.β)[1]
-        _nextq_β(_β) = nextq(x.q, ω, _β)[1]
+        _nextq_q(_q) = nextq(_q, ω, x.β, dt)[1]
+        _nextq_β(_β) = nextq(x.q, ω, _β, dt)[1]
 
         q⁺ₐ = Array(q⁺) # To prevent FD from somehow overwriting q⁺...
         A[1:3, 1:3] .= attitude_jacobian(q⁺ₐ)' * ForwardDiff.jacobian(_nextq_q, x.q) * attitude_jacobian(x.q)   # df/dq with Attitude Jacobian 
@@ -432,13 +455,13 @@ function update(x::SAT_STATE{T}, diodes::DIODES{N, T}, L::Matrix{T}, z::SVector{
     
     # Update the calibration states if desired
     i₀ = 7; i₁ = i₀ + N - 1
-    C⁺ = (calibrate_diodes) ? diodes.calib_values + δx[i₀:i₁] : diodes.calib_values
+    C⁺ = (calibrate_diodes) ? (diodes.calib_values + δx[i₀:i₁]) : diodes.calib_values
 
     i₀ = i₁ + 1; i₁ = i₀ + N - 1
-    α⁺ = (calibrate_diodes) ? diodes.azi_angles + δx[i₀:i₁] : diodes.azi_angles
+    α⁺ = (calibrate_diodes) ? (diodes.azi_angles  +  δx[i₀:i₁]) : diodes.azi_angles
 
     i₀ = i₁ + 1; i₁ = i₀ + N - 1
-    ϵ⁺ = (calibrate_diodes) ? diodes.elev_angles + δx[i₀:i₁] : diodes.elev_angles 
+    ϵ⁺ = (calibrate_diodes) ? (diodes.elev_angles +  δx[i₀:i₁]) : diodes.elev_angles 
 
 
     x⁺ = SAT_STATE(q⁺, β⁺)
@@ -480,7 +503,7 @@ function compute_diode_albedo(data::Matrix{T}, cell_centers_ecef::Array{T, 3}, s
 end
 
 function chol(M)
-    # return cholesky(Symmetric(M)).U 
+    # return cholesky(Hermitian(M)).L 
     return cholesky(Hermitian(M)).U
 end
 

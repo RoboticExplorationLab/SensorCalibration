@@ -57,7 +57,7 @@ end
 
 
 """ Alternate function call that uses an array for state rather than a struct """
-function dynamics(J::SMatrix{3, 3, T, 9}, x::SVector{T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = deg2rad(0.1), kwargs...)::SVector{16, T} where {T}
+function dynamics(J::SMatrix{3, 3, T, 9}, x::SVector{N, T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = deg2rad(0.1), kwargs...)::SVector{16, T} where {N, T}
 
     if norm(@view x[1:3]) < Rₑ                  
         error("ERROR: Impact at time $t")
@@ -143,7 +143,7 @@ end
       Alternate function call for rk4 that takes in a vector for state rather than a struct 
     NOTE that this does NOT normalize the quaternions
 """
-function rk4(J::SMatrix{3, 3, T, 9}, x::SVector{T}, u::SVector{3, T}, t::Epoch, h::Real; kwargs...) where {T} 
+function rk4(J::SMatrix{3, 3, T, 9}, x::SVector{N, T}, u::SVector{3, T}, t::Epoch, h::Real; kwargs...) where {N, T} 
     k₁ = h * dynamics(J, x, u, t; kwargs...)
     k₂ = h * dynamics(J, x + k₁/2, u, t + h/2; kwargs...)
     k₃ = h * dynamics(J, x + k₂/2, u, t + h/2; kwargs...)

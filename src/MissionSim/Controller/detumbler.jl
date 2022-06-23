@@ -62,7 +62,7 @@ end;
 
   (NOTE this is based off of "Magnetic Detumbling of a Rigid Spacecraft" (Avanzini).)
 """
-function b_cross(ω::SVector{S, T}, Bᴮ::SVector{S, T}; κ::T = 5e-4) where {S, T}   # κ = 7e-6
+function b_cross(ω::SVector{S, T}, Bᴮ::SVector{S, T}; κ::T = 4e-4) where {S, T}   # κ = 7e-6
     """ Simple B-cross controller that commands a torque opposite the direction of rotation """
     B̂ᴮ = Bᴮ / norm(Bᴮ)  # Make unit 
  

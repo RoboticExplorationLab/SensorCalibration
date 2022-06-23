@@ -167,6 +167,7 @@ function estimate(sat::SATELLITE, data::MAG_CALIBRATOR{T}) where {T}
 
     else 
         init_guess = data.A \ data.B_meas       # Linear least squares to get initial guess 
+        # init_guess = [1, 1, 1, 0, 0, 0, 0, 0, 0]
         params = gauss_newton(init_guess, data) # Non-linear least squares to refine 
 
         # Convert the params into a calibration matrix and bias 

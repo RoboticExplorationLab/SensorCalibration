@@ -280,7 +280,19 @@ function cayley_map(q₁, q₂)
     return e
 end
 
+function qErr(q₁, q₂)
+    return norm((L(q₁)' * q₂) - [1, 0, 0, 0])
+end
 
+""" Hamilton product w/o matrices """
+function hamilton(q₁, q₂)
+    s₁, v₁ = q₁[1], q₁[2:4]
+    s₂, v₂ = q₂[1], q₂[2:4]   
+
+    s = (s₁ * s₂) - dot(v₁, v₂)
+    v = (s₁ * v₂ + s₂ * v₁ + cross(v₁, v₂))
+    return [s; v]
+end;
 
 # @testset "Rot 2 Quat" begin 
 #     N = 1000

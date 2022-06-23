@@ -164,17 +164,19 @@ end
 
 
 function wrap(a::SVector{N, T}) where {N, T}
-    v = zeros(T, N)
-    for i = 1:N
-        aᵢ = a[i]
-        while aᵢ > pi
-            aᵢ -= (2 * pi)
-        end 
-        while aᵢ ≤ -pi 
-            aᵢ += (2 * pi)
-        end
-        v[i] = aᵢ
-    end
+    v = atan.(sin.(a), cos.(a))
+
+    # v = zeros(T, N)
+    # for i = 1:N
+    #     aᵢ = a[i]
+    #     while aᵢ > pi
+    #         aᵢ -= (2 * pi)
+    #     end 
+    #     while aᵢ ≤ -pi 
+    #         aᵢ += (2 * pi)
+    #     end
+    #     v[i] = aᵢ
+    # end
 
     return SVector{N, T}(v)
 end
@@ -220,6 +222,7 @@ struct SAT_STATE{T}
         """ Primary Constructor """
 
         q = (norm(q) == 1) ? q  : (q / norm(q))
+        q = (q[1] < 0)  ?  -q : q                   # Because quaternions double cover, we force the scalar to be positive
         new{T}(q, β)
     end
 
@@ -284,10 +287,10 @@ struct SAT_COVARIANCE{T}
 
     function SAT_COVARIANCE(ϕ, β, C, α, ϵ)
         N = size(C, 1)
-        T = typeof(C[1])
+        Tt = typeof(ϕ[1])
 
         ℓ = 6 + 3 * N 
-        Σ = zeros(T, ℓ, ℓ)
+        Σ = zeros(Tt, ℓ, ℓ)
         Σ[1:3, 1:3] .= ϕ
         Σ[4:6, 4:6] .= β 
 
@@ -300,10 +303,12 @@ struct SAT_COVARIANCE{T}
         i₀ = i + 1; i = i₀ - 1 + N
         Σ[i₀:i, i₀:i] .= ϵ
 
-        new{T}(Σ, N)
+        Σ = cholesky(Hermitian(Matrix(Σ))).U
+
+        new{Tt}(Σ, N)
     end
 
-    ## NOISE RANDOM!
+    ## Not sure if noise is right!
     function SAT_COVARIANCE(; σϕ = deg2rad(10), σβ = deg2rad(10), σC = 0.1, σα = deg2rad(3), σϵ = deg2rad(3), N = 6)
         """ random """
         Σϕ = diagm( (σϕ^2) * ones(3) )
@@ -365,7 +370,7 @@ struct SATELLITE{S, T}
 
     function SATELLITE(J::SMatrix{3, 3, T, 9}, mag::MAGNETOMETER{T}, dio::DIODES{S, T}, 
                         sta::SAT_STATE{T}, cov::Matrix{T})  where {S, T}
-        """ Primary Constructor -> fixes problem with === errors -> ACTUALLY IT DOESNT  """
+        """ Primary Constructor  """
         new{S, T}(SMatrix{3, 3, T, 9}(J), mag, dio, sta, cov)
     end
 
@@ -374,13 +379,13 @@ struct SATELLITE{S, T}
         """ Random SATELLITE """
 
         if ideal 
-            _J = SMatrix{3, 3, Float64, 9}(0.2 * I(3))
+            _J = isnothing(J) ? SMatrix{3, 3, Float64, 9}(0.2 * I(3)) : J
             _mag = MAGNETOMETER(; ideal = true)
             _dio = DIODES(; ideal = true)
             _sta = SAT_STATE(; ideal = true)
-            _cov = Matrix(1.0 * I(24))  # 6 + 3 * (N = 6)
+            _cov = cholesky(Hermitian(Matrix(cov))).U #Matrix(1.0 * I(24))  # 6 + 3 * (N = 6)
 
-            return SATELLITE(_J, _mag, _dio, _sta, _cov)
+            return SATELLITE(_J, _mag, _dio, _sta, Matrix(_cov))
         end
 
 
@@ -569,11 +574,12 @@ struct STATE{T}
         """ Primary Constructor """
 
         # q = (norm(q) == 1) ? q  : (q / norm(q))  # Enforce unit norm constraint
+        # q = (q[1] < 0) ? -q : q
         new{T}(r, v, q, ω, β)
     end
 
     function STATE(r::Vector{T}, v::Vector{T}, q::Vector{T}, ω::Vector{T}, β::Vector{T}) where {T}
-        @warn "Initializing STATE without static arrays! Automatically converting..."
+        # @warn "Initializing STATE without static arrays! Automatically converting..."
         _r = SVector{3, T}(r)
         _v = SVector{3, T}(v)
         _q = SVector{4, T}(q)
