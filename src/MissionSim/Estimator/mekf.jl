@@ -167,26 +167,97 @@ end
     sqrt_mekf(x, Pchol, alb, ω, Bᴵ, sᴵ, B̃ᴮ, Ĩ, pos, dt, W, V; E_am₀ = 1366.9, use_albedo = true, calibrate_diodes = true)
     
 """
-function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb::ALBEDO, 
-                   ω::SVector{3, T}, Bᴵ::SVector{3, T}, sᴵ::SVector{3, T}, B̃ᴮ::SVector{3, T}, 
-                   Ĩ::SVector{N, T}, pos::SVector{3, T}, dt::T, W::UpperTriangular, V::UpperTriangular; 
-                   E_am₀ = 1366.9, use_albedo = true, calibrate_diodes = true) where {N, T}
-    
 
+"""
+    function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb::ALBEDO, 
+                    ω::SVector{3, T}, Bᴵ::SVector{3, T}, sᴵ::SVector{3, T}, B̃ᴮ::SVector{3, T}, 
+                    Ĩ::SVector{N, T}, pos::SVector{3, T}, dt::T, W::UpperTriangular, V::UpperTriangular; 
+                    E_am₀ = 1366.9, use_albedo = true, calibrate_diodes = true) where {N, T}
+        
+
+        # Prediction 
+        x_pred, A = prediction(x, ω, dt, N; calibrate_diodes = calibrate_diodes)
+        
+        # P = Pchol' * Pchol     #####
+        # Pp = A * P * A' + W    #####
+        Pchol_pred = qrᵣ([Pchol * A'; W])  # Update covariance (as Cholesky)
+
+        # Measurement 
+        Bᴮ_exp, H_mag = mag_measurement(x_pred, Bᴵ / norm(Bᴵ), N; calibrate_diodes = calibrate_diodes)
+        I_exp,  H_cur = current_measurement(x_pred, diodes, sᴵ, pos, alb; E_am₀ = E_am₀,
+                                                use_albedo = use_albedo, calibrate_diodes = calibrate_diodes)
+
+        # Innovation 
+        z = [(B̃ᴮ / norm(B̃ᴮ)) - Bᴮ_exp; (Ĩ / norm(Ĩ)) - I_exp]
+
+        # H_mag *= 2 
+        # H_cur[:, 1:3] *= 2
+        H = [H_mag; H_cur]
+
+        # Kalman Gain (how much we trust the measurement over the dynamics)
+        Pchol_yy = qrᵣ([Pchol_pred * H'; V])
+        L = (((Pchol_pred' * Pchol_pred * H') / Pchol_yy) / Pchol_yy')
+        # ^ the above is the same as Pp * H' * inv(Pyy), for non-sqrt
+
+        # S = H * Pp * H' + V   #Pyy
+        # L = Pp * H' * inv(S)
+
+
+        # Update 
+        x⁺, diodes⁺ = update(x_pred, diodes, L, z; calibrate_diodes = calibrate_diodes) 
+        Pchol⁺ = qrᵣ([ Pchol_pred * (I - L * H)'; V * L']); 
+
+        # P⁺ = Pp - L * H * Pp # (I - L * H) * Pp * (I - L * H) + L * V * L'
+        # Pchol⁺_alt = chol(P⁺)
+        # Pchol⁺ = Pchol⁺_alt
+
+        @debug (norm(Pchol) < norm(Pchol_pred)) && (norm(Pchol) > norm(Pchol⁺))  # Goes up with prediction, down with measurement
+
+        # # #### REMOVE ! 
+        # θ_err = acos( (Bᴮ_exp / norm(Bᴮ_exp))' * (B̃ᴮ / norm(B̃ᴮ)) )
+
+        nP   = norm(Pchol)
+        nPp  = norm(Pchol_pred)
+        nP⁺  = norm(Pchol⁺)
+        nPd  = norm(Pchol[7:end, 7:end])
+        nP⁺d = norm(Pchol⁺[7:end, 7:end])
+        @debug (x_pred !== x) && (x⁺ !== x_pred)
+        @debug (Pchol !== Pchol_pred) && (Pchol_pred !== Pchol⁺)
+
+        # Diode debugging 
+        nC⁻ = norm(diodes.calib_values - ones(6))
+        nC⁺ = norm(diodes⁺.calib_values - ones(6))
+        nα⁻ = norm(diodes.azi_angles .- [0.0;      pi;     (pi/2); (-pi/2); 0.0;    pi])
+        nα⁺ = norm(diodes⁺.azi_angles .- [0.0;      pi;     (pi/2); (-pi/2); 0.0;    pi])
+
+        # @infiltrate
+        # # #########
+
+        return x⁺, diodes⁺, Pchol⁺
+    end
+"""
+
+
+# With iteration...
+function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb::ALBEDO, 
+    ω::SVector{3, T}, Bᴵ::SVector{3, T}, sᴵ::SVector{3, T}, B̃ᴮ::SVector{3, T}, 
+    Ĩ::SVector{N, T}, pos::SVector{3, T}, dt::T, W::UpperTriangular, V::UpperTriangular; 
+    E_am₀ = 1366.9, use_albedo = true, calibrate_diodes = true) where {N, T}
+
+
+    ### ITERATION 1 ###
     # Prediction 
     x_pred, A = prediction(x, ω, dt, N; calibrate_diodes = calibrate_diodes)
-    
-    # P = Pchol' * Pchol     #####
-    # Pp = A * P * A' + W    #####
+
     Pchol_pred = qrᵣ([Pchol * A'; W])  # Update covariance (as Cholesky)
 
-    # Measurement 
-    Bᴮ_exp, H_mag = mag_measurement(x_pred, Bᴵ / norm(Bᴵ), N; calibrate_diodes = calibrate_diodes)
+    # Measurement (do NOT normalize this, or at least not the current one)
+    Bᴮ_exp, H_mag = mag_measurement(x_pred, Bᴵ, N; calibrate_diodes = calibrate_diodes)
     I_exp,  H_cur = current_measurement(x_pred, diodes, sᴵ, pos, alb; E_am₀ = E_am₀,
-                                             use_albedo = use_albedo, calibrate_diodes = calibrate_diodes)
+                                use_albedo = use_albedo, calibrate_diodes = calibrate_diodes)
 
     # Innovation 
-    z = [(B̃ᴮ / norm(B̃ᴮ)) - Bᴮ_exp; (Ĩ / norm(Ĩ)) - I_exp]
+    z = [B̃ᴮ - Bᴮ_exp; Ĩ - I_exp]
 
     # H_mag *= 2 
     # H_cur[:, 1:3] *= 2
@@ -197,92 +268,95 @@ function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb:
     L = (((Pchol_pred' * Pchol_pred * H') / Pchol_yy) / Pchol_yy')
     # ^ the above is the same as Pp * H' * inv(Pyy), for non-sqrt
 
-    # S = H * Pp * H' + V   #Pyy
-    # L = Pp * H' * inv(S)
-
-
     # Update 
     x⁺, diodes⁺ = update(x_pred, diodes, L, z; calibrate_diodes = calibrate_diodes) 
     Pchol⁺ = qrᵣ([ Pchol_pred * (I - L * H)'; V * L']); 
 
-    # P⁺ = Pp - L * H * Pp # (I - L * H) * Pp * (I - L * H) + L * V * L'
-    # Pchol⁺_alt = chol(P⁺)
-    # Pchol⁺ = Pchol⁺_alt
 
-    @debug (norm(Pchol) < norm(Pchol_pred)) && (norm(Pchol) > norm(Pchol⁺))  # Goes up with prediction, down with measurement
 
-    # # #### REMOVE ! 
-    # θ_err = acos( (Bᴮ_exp / norm(Bᴮ_exp))' * (B̃ᴮ / norm(B̃ᴮ)) )
+    
+    # ### ITERATION 2 ###
+    # # Prediction 
+    # x_pred = x⁺ 
+    # _, A = prediction(x⁺, ω, dt, N; calibrate_diodes = calibrate_diodes)
+    
+    # Pchol_pred = qrᵣ([Pchol * A'; W])  # Update covariance (as Cholesky)
 
-    nP   = norm(Pchol)
-    nPp  = norm(Pchol_pred)
-    nP⁺  = norm(Pchol⁺)
-    nPd  = norm(Pchol[7:end, 7:end])
-    nP⁺d = norm(Pchol⁺[7:end, 7:end])
-    @debug (x_pred !== x) && (x⁺ !== x_pred)
-    @debug (Pchol !== Pchol_pred) && (Pchol_pred !== Pchol⁺)
+    # # Measurement 
+    # Bᴮ_exp, H_mag = mag_measurement(x_pred, Bᴵ, N; calibrate_diodes = calibrate_diodes)
+    # I_exp,  H_cur = current_measurement(x_pred, diodes, sᴵ, pos, alb; E_am₀ = E_am₀,
+    #                             use_albedo = use_albedo, calibrate_diodes = calibrate_diodes)
 
-    # Diode debugging 
-    nC⁻ = norm(diodes.calib_values - ones(6))
-    nC⁺ = norm(diodes⁺.calib_values - ones(6))
-    nα⁻ = norm(diodes.azi_angles .- [0.0;      pi;     (pi/2); (-pi/2); 0.0;    pi])
-    nα⁺ = norm(diodes⁺.azi_angles .- [0.0;      pi;     (pi/2); (-pi/2); 0.0;    pi])
+    # # Innovation 
+    # z = [B̃ᴮ - Bᴮ_exp; Ĩ - I_exp]
+    # # @infiltrate
 
-    # @infiltrate
-    # # #########
+    # # H_mag *= 2 
+    # # H_cur[:, 1:3] *= 2
+    # H = [H_mag; H_cur]
+
+    # # Kalman Gain (how much we trust the measurement over the dynamics)
+    # Pchol_yy = qrᵣ([Pchol_pred * H'; V])
+    # L = (((Pchol_pred' * Pchol_pred * H') / Pchol_yy) / Pchol_yy')
+    # # ^ the above is the same as Pp * H' * inv(Pyy), for non-sqrt
+
+    # # Update 
+    # x⁺, diodes⁺ = update(x_pred, diodes, L, z; calibrate_diodes = calibrate_diodes) 
+    # Pchol⁺ = qrᵣ([ Pchol_pred * (I - L * H)'; V * L']); 
 
     return x⁺, diodes⁺, Pchol⁺
 end
 
+
 # Add in new tests, comment and clean it up 
 # ForwardDIff test does NOT pass (especially the bias term. May be 'good enough'?)
-# PANIC - I dont know if we should be using ±hat(γ) b/c Zacs notes say minus. TEST!
+# PANIC - I dont know if we should be using ±hat(γ) b/c Zacs notes say minus (Depends on if we use ± in Rodrigues)
 
 # WHAT IF I do the standard q̇ and then use the attitude Jacobian (somehow...?)
 """
-function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate_diodes::Bool = true) where {T}
+    function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate_diodes::Bool = true) where {T}
 
-    # Generate axis-angle representation
-    γ  = ω - x.β     # Corrected angular velocity 
-    nγ = norm(γ)     # Magnitude of corrected angular velocity 
+        # Generate axis-angle representation
+        γ  = ω - x.β     # Corrected angular velocity 
+        nγ = norm(γ)     # Magnitude of corrected angular velocity 
 
-    # Predict next orientation (as a quaternion)
-    r  = γ / nγ       # Unit axis of rotation
-    θ  = nγ * dt      # Angular rotaation about unit axis
-    q⁺ = (nγ == 0.0) ? x.q :
-                       qmult(x.q, [cos(θ / 2); r*sin(θ / 2)])  # <- right side is axis-angle to unit quaternion
+        # Predict next orientation (as a quaternion)
+        r  = γ / nγ       # Unit axis of rotation
+        θ  = nγ * dt      # Angular rotaation about unit axis
+        q⁺ = (nγ == 0.0) ? x.q :
+                        qmult(x.q, [cos(θ / 2); r*sin(θ / 2)])  # <- right side is axis-angle to unit quaternion
 
-    # q⁺ = (nγ == 0.0) ? x.q :
-    #                    qmult([cos(θ / 2); r*sin(θ / 2)], x.q, )  # <- left side is axis-angle to unit quaternion
+        # q⁺ = (nγ == 0.0) ? x.q :
+        #                    qmult([cos(θ / 2); r*sin(θ / 2)], x.q, )  # <- left side is axis-angle to unit quaternion
 
-    (norm(q⁺) ≉ 1.0) && @infiltrate
-    # @assert (norm(q⁺) ≈ 1.0) "Unit quaternion isn't unit!"    
-    x⁺ = update_state(x; q = q⁺)  # Doesn't matter if we are calibrating diodes, only q changes in prediction
+        (norm(q⁺) ≉ 1.0) && @infiltrate
+        # @assert (norm(q⁺) ≈ 1.0) "Unit quaternion isn't unit!"    
+        x⁺ = update_state(x; q = q⁺)  # Doesn't matter if we are calibrating diodes, only q changes in prediction
 
-    # Calculate Jacobian ∂f/∂x
+        # Calculate Jacobian ∂f/∂x
 
-    # @debug γ̂ is currently positive (Zac's is negative)
-    γ̂ = hat(γ / nγ)  # Skew-symmetric matrix 
-    R = (nγ == 0.0) ? I(3)  :  # Avoid the divide-by-zero error
-                      I(3) + (γ̂ ) * sin(nγ) + ((γ̂ )^2) * (1 - cos(nγ)); # Rodrigues formula
-                      
-    A = zeros(T, 6, 6)     # Jacobian of f(x) wrt x,   A  =   [R   -dt I₃;  0₃  I₃]
-    A[1:3, 1:3] .= R  # or -hat(ω?)
-    A[1:3, 4:6] .= -dt * I(3) 
-    A[4:6, 4:6] .= I(3)
-    # A[4:6, 1:3] .= zeros(3, 3)
+        γ̂ = hat(γ / nγ)  # Skew-symmetric matrix 
+        R = (nγ == 0.0) ? I(3)  :  # Avoid the divide-by-zero error
+                        I(3) - (γ̂ ) * sin(nγ) + ((γ̂ )^2) * (1 - cos(nγ)); # Rodrigues formula
+                        
+        A = zeros(T, 6, 6)     # Jacobian of f(x) wrt x,   A  =   [R   -dt I₃;  0₃  I₃]
+        A[1:3, 1:3] .= R  # or -hat(ω?)
+        A[1:3, 4:6] .= -dt * I(3) 
+        A[4:6, 4:6] .= I(3)
+        # A[4:6, 1:3] .= zeros(3, 3)
 
-    if calibrate_diodes
-        # Add in additional states if calibrating (i.e., x = [q, β, C, α, ϵ])
-        Ac = zeros(T, 6 + 3 * N, 6 + 3 * N)  # Ac = [A  0; 0 I]
-        Ac[1:6, 1:6] .= A 
-        Ac[7:end, 7:end] .= I(3 * N)
-        
-        return x⁺, Ac
-    else
-        return x⁺, A
-    end
-end;
+        if calibrate_diodes
+            # Add in additional states if calibrating (i.e., x = [q, β, C, α, ϵ])
+            Ac = zeros(T, 6 + 3 * N, 6 + 3 * N)  # Ac = [A  0; 0 I]
+            Ac[1:6, 1:6] .= A 
+            Ac[7:end, 7:end] .= I(3 * N)
+            
+            return x⁺, Ac
+        else
+            return x⁺, A
+        end
+    end;
+
 """
 
 # """
@@ -295,7 +369,8 @@ end;
     # Should I have θ = nγ * dt or just nγ? (both, according to class notes)
     function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate_diodes::Bool = true) where {T}
 
-        function nextq(q, ω, β, dt)
+        function nextq(q, ω, β, dt) 
+            
             # Generate axis-angle representation
             γ  = ω - β     # Corrected angular velocity 
             nγ = norm(γ)     # Magnitude of corrected angular velocity 
@@ -394,7 +469,7 @@ function current_measurement(x::SAT_STATE{T}, diodes::DIODES{N, T}, sᴵ::SVecto
         albedo_matrix = earth_albedo(pos, sᴵ, alb.refl.data)
         for i = 1:N 
             diode_albedo = compute_diode_albedo(albedo_matrix, alb.cell_centers_ecef, n[i, :], pos)  
-            albedos[i] = (C[i] / E_am₀) * diode_albedo 
+            albedos[i] = C[i] * (diode_albedo / E_am₀)  
         end
     end
 
@@ -431,7 +506,8 @@ function current_measurement(x::SAT_STATE{T}, diodes::DIODES{N, T}, sᴵ::SVecto
     Is[Is .< 1e-8]   .= 0.0   # Photodiodes don't generate negative current
     H[Is .≤  0.0, :] .= 0.0   #   ^ to match the above 
 
-    return (Is / norm(Is)), H
+    # return (Is / norm(Is)), H
+    return Is, H
 end;
 
 
@@ -469,8 +545,6 @@ function update(x::SAT_STATE{T}, diodes::DIODES{N, T}, L::Matrix{T}, z::SVector{
 
     return x⁺, diodes⁺
 end
-
-
 
 
 

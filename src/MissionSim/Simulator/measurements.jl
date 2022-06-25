@@ -16,6 +16,8 @@
       - Should get_calib_matrix be static?
 """
 
+# σ_current, gyro  no longer scales, but matches the values in On-Orbit. I do noise on mag with rotation, not noise, but I ran some 
+#   tests to determine what the angular distance corresponded to 0.25deg
 """
     generate_measurements(sat, alb, x, t, dt; E_am₀, σB, σ_gyro_scale, σr, σ_current_scale)
 
@@ -49,17 +51,17 @@
 
 """
 function generate_measurements(sat::SATELLITE, alb::ALBEDO, x::STATE, t::Epoch, dt::T; 
-             E_am₀ = 1366.9, σB = deg2rad(2.0), σ_gyro_scale = 0.005, 
-             σr = 5e3, σ_current_scale = 0.05, use_albedo = true) where {T}
+             E_am₀ = 1366.9, σB = deg2rad(0.25), σ_gyro = 0.5e-4, 
+             σr = 5e3, σ_current = 0.05, use_albedo = true) where {T}
 
     ᴮQᴵ = quat2rot(x.q)'  # Compute once and pass in 
 
     # Call each sensor
     Bᴵ, Bᴮ, B̃ᴮ  = mag_measurement( sat, x, ᴮQᴵ, t, dt; σ = σB) 
-    w, w̃, ηw    = gyro_measurement(x; σ_scale = σ_gyro_scale) 
+    w, w̃, ηw    = gyro_measurement(x; σ_scale = σ_gyro) 
     r, r̃, ηr    = pos_measurement( x; σ = σr) 
     sᴵ, sᴮ, ecl = sun_measurement( x, ᴮQᴵ, t)
-    I, Ĩ, ηI    = diode_measurement(sat, alb, x, ecl, sᴵ, sᴮ; σ_scale = σ_current_scale, E_am₀ = E_am₀, use_albedo = use_albedo)
+    I, Ĩ, ηI    = diode_measurement(sat, alb, x, ecl, sᴵ, sᴮ; σ_scale = σ_current, E_am₀ = E_am₀, use_albedo = use_albedo)
 
     # Store the outputs 
     sensors = SENSORS(B̃ᴮ, Ĩ, w̃, r̃)
@@ -69,6 +71,9 @@ function generate_measurements(sat::SATELLITE, alb::ALBEDO, x::STATE, t::Epoch, 
     return truth, sensors, ecl, noise
 end
 
+
+
+# I have noise as a rotation, the paper has it as additive with σ = 1e-9 T, which seems to only do 0.25 deg of rotation
 """
       Generates the true magnetic field vector in inertial and body frames. Additionally, 
     uses the satellite's magnetometer parameters, the states bias, and a noise rotation 
@@ -90,7 +95,7 @@ end
       - `Bᴮ`: Magnetic field vector in body frame (noiseless)                                   | [3,] (SVector)
       - `B̃ᴮ`: Measured magnetic field vector in body frame (noisy, biased, and un-calibrated)   | [3,] (SVector)
 """
-function mag_measurement(sat::SATELLITE, x::STATE, ᴮQᴵ::SMatrix{3, 3, T, 9}, t::Epoch, dt::T; σ = deg2rad(3.0)) where {T}
+function mag_measurement(sat::SATELLITE, x::STATE, ᴮQᴵ::SMatrix{3, 3, T, 9}, t::Epoch, dt::T; σ = deg2rad(0.25)) where {T}
 
     Bᴵ = SVector{3, Float64}(IGRF13(x.r, t))   # Mag vector in inertial frame 
     Bᴮ = ᴮQᴵ * Bᴵ 
@@ -230,13 +235,13 @@ function diode_measurement(sat::SATELLITE{N, T}, alb::ALBEDO, x::STATE{T}, ecl::
             diode_albedo = (use_albedo) ? compute_diode_albedo(albedo_matrix, alb.cell_centers_ecef, surface_normal, x.r) : 0.0
 
             # Calculate current, including noise and Earth's albedo 
-            current = C[i] * dot(surface_normal, sᴮ) + (C[i] / E_am₀) * diode_albedo  
+            current = C[i] * (dot(surface_normal, sᴮ) + (diode_albedo / E_am₀) )
             current *= ecl
             η = rand(Normal(0.0, abs(σ_scale * current)))
 
             # Photodiodes don't generate negative current
-            I[i] = (current < 0) ? 0.0 : current 
-            Ĩ[i] = (current + η < 0.0) ? 0.0 : (current + η) 
+            I[i] = (current < 1e-8) ? 0.0 : current 
+            Ĩ[i] = (current + η < 1e-8) ? 0.0 : (current + η) 
             ηI[i] = η 
         end
 

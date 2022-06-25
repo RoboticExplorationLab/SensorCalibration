@@ -30,14 +30,15 @@ include("state_machine.jl")
 
 """ x₀ = initial state (eci is r, v); 
 ℓ is max sim length """
-# Add in commands for different starting modes, noise, etc... # NumOrbits, whether it is detumbled and bias_less
-@info "Using FD in prediction"
-@info "No noise, no albedo (?)"
+# Add in commands for different starting modes, noise, etc... # NumOrbits, whether it is detumbled and bias_less\
+# Add in verbose for showing plots or not (used for monte carlo)
+@info "No noise, no albedo, no bias (?)"
+@info "Using paper values for (ang vel, noise)"
 function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2) 
     ##### INITIALIZE ##### 
 
     # Get initial state (enviroment)
-    x₀, T_orbit = get_initial_state(; bias_less = false, detumbled = false)
+    x₀, T_orbit = get_initial_state(; bias_less = true, detumbled = true)
     # x₀ = STATE(x₀.r, x₀.v, x₀.q, SVector{3, Float64}(0.0, deg2rad(0.5), 0.0), x₀.β); @info "Low spin!"
 
     #   Make sure that the initial environment state matches the true satellite state
@@ -46,7 +47,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2)
 
     sat_est   = SATELLITE(; J = sat_truth.J, sta = SAT_STATE(; ideal = true), mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true), cov = sat_truth.covariance)
     x, t = x₀, t₀
-    ℓ = Int(round(4.0 * T_orbit / dt))  # MAX length of sim, in time steps
+    ℓ = Int(round(1.0 * T_orbit / dt))  # MAX length of sim, in time steps
 
     alb = get_albedo(2);  # Set up REFL data
 
@@ -66,14 +67,14 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2)
     progress_bar = Progress(ℓ);
 
     ## Start with Detumble
-    op_mode = detumble; data = nothing;  # Start with detumble
+    # op_mode = detumble; data = nothing;  # Start with detumble
 
     ## Start with Mag Cal 
     # op_mode = detumble; flags = FLAGS(; init_detumble = true, mag_cal = false, dio_cal = false, final_detumble = false); data = nothing
 
     ## Start with Diode Cal 
-    # op_mode = chill; flags.init_detumble = true; flags.magnetometer_calibrated = true; data = nothing;
-    #     sat_est = SATELLITE(sat_est.J, sat_truth.magnetometer, sat_est.diodes, sat_est.state, sat_est.covariance)
+    op_mode = chill; flags.init_detumble = true; flags.magnetometer_calibrated = true; data = nothing;
+        sat_est = SATELLITE(sat_est.J, sat_truth.magnetometer, sat_est.diodes, sat_est.state, sat_est.covariance)
 
     ## Start with Detumble (Round II)
     # op_mode = detumble; data = nothing; flags = FLAGS(; init_detumble = true, mag_cal = true, dio_cal = true, final_detumble = false)
@@ -144,7 +145,7 @@ function get_initial_state(; _Re = 6378136.3, detumbled = false, bias_less = fal
     v₀ = SVector{3, Float64}(eci0[4:6])
     q₀ = randn(4);  q₀ = SVector{4, Float64}(q₀ / norm(q₀))
     ω₀ = (detumbled) ? SVector{3, Float64}(0.05 * randn(3)) : SVector{3, Float64}(0.5 * randn(3))
-    β₀ = (bias_less) ? SVector{3, Float64}(0.0, 0.0, 0.0)  : SVector{3, Float64}(rand(Normal(0.0, deg2rad(2.0)), 3))
+    β₀ = (bias_less) ? SVector{3, Float64}(0.0, 0.0, 0.0)  : SVector{3, Float64}(rand(Normal(0.0, deg2rad(5)), 3)) # Initial guess can be a bit off
     
     T_orbit = orbit_period(oe0[1])
     x = STATE(r₀, v₀, q₀, ω₀, β₀)
@@ -256,8 +257,8 @@ function diode_calibration_report(sat_true::SATELLITE, est_hist::Vector{SATELLIT
     println("____DIODE___|______Truth (C,α,ϵ)_______|______Final Guess______|______Init Guess_______|_____Improved?___")
     for i = 1:6 
         print("     $i     |    $(round(C[i], digits = 2)), $(round(α[i], digits = 2)), $(round(ϵ[i], digits = 2))  \t|")
-        print("   $(round(Cf[i], digits = 2)), $(round(αf[i], digits = 2)), $(round(ϵf[i], digits = 2))  \t|")
-        print("   $(round(C₀[i], digits = 2)), $(round(α₀[i], digits = 2)), $(round(ϵ₀[i], digits = 2))  \t|")
+        print("   $(round(Cf[i], digits = 2)), $(round(αf[i], digits = 2)), $(round(ϵf[i], digits = 2))    \t|")
+        print("   $(round(C₀[i], digits = 2)), $(round(α₀[i], digits = 2)), $(round(ϵ₀[i], digits = 2))    \t|")
         print( (abs(C₀[i] - C[i]) ≤ abs(Cf[i] - C[i])) ? " No!, " : " Yes!, ")
         print( (abs(α₀[i] - α[i]) ≤ abs(αf[i] - α[i])) ? " No!, " : " Yes!, ")
         println( (abs(ϵ₀[i] - ϵ[i]) ≤ abs(ϵf[i] - ϵ[i])) ? " No! " : " Yes! ")
@@ -335,7 +336,7 @@ end;
 
 
 
-# Random.seed!(1001)
+# Random.seed!(565) #1001)
 sat_truth, sat_est, truths, sensors, ecls, noises, states, sat_ests, op_modes = main(); # Adjust arguments to include initial state
 # mekf_report(states, sat_ests)
 # diode_calibration_report(sat_truth, sat_ests)

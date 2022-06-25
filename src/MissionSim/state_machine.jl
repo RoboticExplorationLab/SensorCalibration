@@ -17,7 +17,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
     ### Generate measurements
 
     # No noise!
-    truth, sensors, ecl, noise = generate_measurements(sat_truth, alb, x, t, dt; use_albedo = use_albedo, σB = 0.0, σ_gyro_scale = 0.0, σr = 0.0, σ_current_scale = 0.0);
+    truth, sensors, ecl, noise = generate_measurements(sat_truth, alb, x, t, dt; use_albedo = use_albedo, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0);
     
     # Update measurements as time goes on 
     flags.magnetometer_calibrated && (sensors = correct_magnetometer(sat_est, sensors))
@@ -160,7 +160,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
             # Check if covariance of calibration states is low enough to fix
             if norm(sat_est.covariance[7:end, 7:end]) < calib_cov_thres 
-                next_mode = detumble 
+                next_mode = finished #detumble 
                 flags.diodes_calibrated = true 
             end
 
@@ -275,22 +275,39 @@ end
 
 # This method does not rely on knowledge of photodiode setup in advance
 function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
+    n(α, ϵ) = [sin(pi/2 - ϵ)*cos(α); sin(pi/2 - ϵ) * sin(α); cos(pi/2 - ϵ)]
 
-    sph2cart(α, ϵ, ρ) = [ρ * sin(pi/2 - ϵ)*cos(α); ρ * sin(pi/2 - ϵ) * sin(α); ρ * cos(pi/2 - ϵ)]
+    Ĩ    = sens.diodes ./ diodes.calib_values 
+    azi  = diodes.azi_angles
+    elev = diodes.elev_angles 
     
-    sx, sy, sz = 0.0, 0.0, 0.0
-
+    ns = zeros(eltype(Ĩ),  6, 3) 
     for i = 1:6 
-        d = sens.diodes[i] / diodes.calib_values[i]
-        x, y, z = sph2cart(diodes.azi_angles[i], diodes.elev_angles[i], d)
-        sx += x 
-        sy += y
-        sz += z
-    end
+        ns[i, :] .= n(azi[i], elev[i])
+    end 
 
-    ŝᴮ = [sx, sy, sz]
-    return SVector{3, T}(ŝᴮ / norm(ŝᴮ))
+    ŝ = (ns' * ns) \ (ns' * Ĩ)
+    return ŝ / norm(ŝ)
 end
+
+
+# function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
+
+#     sph2cart(α, ϵ, ρ) = [ρ * sin(pi/2 - ϵ)*cos(α); ρ * sin(pi/2 - ϵ) * sin(α); ρ * cos(pi/2 - ϵ)]
+    
+#     sx, sy, sz = 0.0, 0.0, 0.0
+
+#     for i = 1:6 
+#         d = sens.diodes[i] / diodes.calib_values[i]
+#         x, y, z = sph2cart(diodes.azi_angles[i], diodes.elev_angles[i], d)
+#         sx += x 
+#         sy += y
+#         sz += z
+#     end
+
+#     ŝᴮ = [sx, sy, sz]
+#     return SVector{3, T}(ŝᴮ / norm(ŝᴮ))
+# end
 
 function estimate_sun_vector2(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
 
