@@ -392,7 +392,7 @@ end
 
         γ̂ = hat(γ / nγ)  # Skew-symmetric matrix 
         R = (nγ == 0.0) ? I(3)  :  # Avoid the divide-by-zero error
-                        I(3) + (γ̂ ) * sin(nγ) + ((γ̂ )^2) * (1 - cos(nγ)); # Rodrigues formula
+                          I(3) + (γ̂ ) * sin(nγ) + ((γ̂ )^2) * (1 - cos(nγ)); # Rodrigues formula
 
         @debug R == exp(nγ * hat(γ / nγ) )
                         

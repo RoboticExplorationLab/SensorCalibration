@@ -38,7 +38,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2)
     ##### INITIALIZE ##### 
 
     # Get initial state (enviroment)
-    x₀, T_orbit = get_initial_state(; bias_less = true, detumbled = true)
+    x₀, T_orbit = get_initial_state(; bias_less = false, detumbled = false)
     # x₀ = STATE(x₀.r, x₀.v, x₀.q, SVector{3, Float64}(0.0, deg2rad(0.5), 0.0), x₀.β); @info "Low spin!"
 
     #   Make sure that the initial environment state matches the true satellite state
@@ -47,7 +47,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2)
 
     sat_est   = SATELLITE(; J = sat_truth.J, sta = SAT_STATE(; ideal = true), mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true), cov = sat_truth.covariance)
     x, t = x₀, t₀
-    ℓ = Int(round(1.0 * T_orbit / dt))  # MAX length of sim, in time steps
+    ℓ = Int(round(3.0 * T_orbit / dt))  # MAX length of sim, in time steps
 
     alb = get_albedo(2);  # Set up REFL data
 
@@ -67,15 +67,16 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2)
     progress_bar = Progress(ℓ);
 
     ## Start with Detumble
-    # op_mode = detumble; data = nothing;  # Start with detumble
+    op_mode = detumble; data = nothing;  # Start with detumble
 
     ## Start with Mag Cal 
     # op_mode = detumble; flags = FLAGS(; init_detumble = true, mag_cal = false, dio_cal = false, final_detumble = false); data = nothing
 
     ## Start with Diode Cal 
-    op_mode = chill; flags.init_detumble = true; flags.magnetometer_calibrated = true; data = nothing;
-        sat_est = SATELLITE(sat_est.J, sat_truth.magnetometer, sat_est.diodes, sat_est.state, sat_est.covariance)
+    # op_mode = chill; flags.init_detumble = true; flags.magnetometer_calibrated = true; data = nothing;
+        # sat_est = SATELLITE(sat_est.J, sat_truth.magnetometer, sat_est.diodes, sat_est.state, sat_est.covariance)
 
+    
     ## Start with Detumble (Round II)
     # op_mode = detumble; data = nothing; flags = FLAGS(; init_detumble = true, mag_cal = true, dio_cal = true, final_detumble = false)
     #     sat_est = SATELLITE(sat_est.J, sat_truth.magnetometer, sat_truth.diodes, sat_truth.state, sat_est.covariance)
@@ -131,12 +132,12 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2)
 end
 
 function get_initial_state(; _Re = 6378136.3, detumbled = false, bias_less = false) 
-    ecc = 0.0001717 + 0.00001 * randn()
-    inc = 51.6426 + randn()
-    Ω   = 178.1369 + randn()
-    ω   = 174.7410 + randn()
-    M   = 330.7918 + 100 + randn()   # +94/95 is just before sun, -40 is just before eclipse
-    sma = (_Re + 421e3) / (1 + ecc)  # Apogee = semi_major * (1 + ecc)
+    ecc = 0.0001717 + 0.001 * randn()
+    inc = 51.6426 + 5 * randn()
+    Ω   = 178.1369 + 5 * randn()
+    ω   = 174.7410 + 5 * randn()
+    M   = 330.7918 + 50 * randn()   # +94/95 is just before sun, -40 is just before eclipse
+    sma = (_Re + 421e3 + 1000 * randn()) / (1 + ecc)  # Apogee = semi_major * (1 + ecc)
 
     oe0 = [sma, ecc, inc, Ω, ω, M]   # Initial state, oscullating elements
     eci0 = sOSCtoCART(oe0, use_degrees = true) # Convert to Cartesean
@@ -145,7 +146,7 @@ function get_initial_state(; _Re = 6378136.3, detumbled = false, bias_less = fal
     v₀ = SVector{3, Float64}(eci0[4:6])
     q₀ = randn(4);  q₀ = SVector{4, Float64}(q₀ / norm(q₀))
     ω₀ = (detumbled) ? SVector{3, Float64}(0.05 * randn(3)) : SVector{3, Float64}(0.5 * randn(3))
-    β₀ = (bias_less) ? SVector{3, Float64}(0.0, 0.0, 0.0)  : SVector{3, Float64}(rand(Normal(0.0, deg2rad(5)), 3)) # Initial guess can be a bit off
+    β₀ = (bias_less) ? SVector{3, Float64}(0.0, 0.0, 0.0)  : SVector{3, Float64}(rand(Normal(0.0, deg2rad(2)), 3)) # Initial guess can be a bit off
     
     T_orbit = orbit_period(oe0[1])
     x = STATE(r₀, v₀, q₀, ω₀, β₀)
@@ -316,7 +317,7 @@ function mekf_report(states::Vector{STATE{T}}, est_hist::Vector{SATELLITE{6, T}}
     return qs, q̂s, βs, β̂s
 end;
 
-function detumbler_report(states, sensors; τ₁ = deg2rad(25), τ₂ = deg2rad(10) )
+function detumbler_report(states, sensors; τ₁ = deg2rad(15), τ₂ = deg2rad(8) )
     N = size(states, 1)
     ωs = [states[i].ω for i = 1:N]; ωs = reduce(hcat, ωs)'
     ω̂s = [sensors[i].gyro for i = 1:N]; ω̂s = reduce(hcat, ω̂s)'

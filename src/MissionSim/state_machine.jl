@@ -9,8 +9,8 @@
 # Given a state, generate measurements. Estimate/Control. Generate and return next step (maybe flip that to be first?)
 # Move to state machine. Consider splitting by typeof(data). Add in optional arguments.
 function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}, t::Epoch, dt::Real, op_mode::Operation_mode, 
-                flags::FLAGS, idx::Int, data, progress_bar, T_orbit; use_albedo = true, initial_detumble_thresh = deg2rad(25), final_detumble_thresh = deg2rad(10), 
-                mag_ds_rate = 60, calib_cov_thres = 0.04, mekf_cov_thres = 0.01, σβ = deg2rad(0.1) ) where {T}
+                flags::FLAGS, idx::Int, data, progress_bar, T_orbit; use_albedo = true, initial_detumble_thresh = deg2rad(15), final_detumble_thresh = deg2rad(8),  # was 25, 10 deg
+                mag_ds_rate = 60, calib_cov_thres = 0.035, mekf_cov_thres = 0.01, σβ = deg2rad(0.1) ) where {T}
 
     t += dt   # Update time
 
@@ -23,7 +23,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
     flags.magnetometer_calibrated && (sensors = correct_magnetometer(sat_est, sensors))
 
     # MEKF cant have it calibrated but DETUMBLE wants it calibrated
-    # if flags.diodes_calibrated   # THIS IS ACTUALLY BAD for 
+    # if flags.diodes_calibrated   # THIS IS ACTUALLY BAD  
     #     correct_gyroscope(sat_est, sensors)
     # end
 
@@ -80,7 +80,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             next_mode = detumble # Keep detumbling  
         end 
 
-        notes = "Mode: $op_mode\t||̂ω||: $(norm(sensors.gyro)) \t ||ω||: $(norm(x.ω))"
+        notes = "Mode: $op_mode\t||̂ω||: $(norm(rad2deg.(sensors.gyro))) \t ||ω||: $(norm(rad2deg.(x.ω)))"
 
     """ mag_cal -> chill, diode_cal 
 
@@ -94,7 +94,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
     """
     elseif op_mode == mag_cal 
 
-        notes = "Mode: $op_mode\ti: $idx \tSamples: $(data.idx[1])/$(data.N)"
+        notes = "Mode: $op_mode \tSamples: $(data.idx[1])/$(data.N)"
         # Downsample 
         if idx % (mag_ds_rate / dt) == 0
             Bᴵ_pred = IGRF13(sensors.pos, t)  # Because this is attitude-independent we just use Bᴵ
@@ -111,7 +111,9 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
                     data = MEKF_DATA()
                     reset_cov!(sat_est; reset_calibration = true)
                     q = run_triad(sensors, sat_est, t, flags.in_sun)
+                    # q = x.q; @info "Using true q in mag cal!"
                     sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
+
                 end
             end
         end
@@ -160,7 +162,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
             # Check if covariance of calibration states is low enough to fix
             if norm(sat_est.covariance[7:end, 7:end]) < calib_cov_thres 
-                next_mode = finished #detumble 
+                next_mode = detumble 
                 flags.diodes_calibrated = true 
             end
 
