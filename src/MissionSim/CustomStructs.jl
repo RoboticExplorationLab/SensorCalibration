@@ -431,14 +431,14 @@ struct SENSORS{N, T}
     pos::SVector{3, T}               # Measured position 
 end
 
-function RecipesBase.plot(s::Vector{SENSORS}; split = false, kwargs...)
+function RecipesBase.plot(s::Vector{SENSORS{6, T}}; split = false, kwargs...) where {T}
     N = size(s, 1)
 
     # Split apart and format as matrices for plotting
-    mags = [s[i].magnetometer for i = 1:N]; mags = hcat(mags...)';
-    dios = [s[i].diodes       for i = 1:N]; dios = hcat(dios...)';
-    gyrs = [s[i].gyro         for i = 1:N]; gyrs = hcat(gyrs...)';
-    poss = [s[i].pos          for i = 1:N]; poss = hcat(poss...)';
+    mags = [s[i].magnetometer for i = 1:N]; mags = reduce(hcat, mags)'; # mags = hcat(mags...)';
+    dios = [s[i].diodes       for i = 1:N]; dios = reduce(hcat, dios)'; # dios = hcat(dios...)';
+    gyrs = [s[i].gyro         for i = 1:N]; gyrs = reduce(hcat, gyrs)'; # gyrs = hcat(gyrs...)';
+    poss = [s[i].pos          for i = 1:N]; poss = reduce(hcat, poss)'; # poss = hcat(poss...)';
 
     # Make the plots
     pM = plot(mags, title = "Magnetometers", xlabel = "Index", ylabel = "Mag Field (μT)",   label = ["x" "y" "z"]; kwargs...)
