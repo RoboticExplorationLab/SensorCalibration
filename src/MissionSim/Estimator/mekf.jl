@@ -77,7 +77,7 @@ function reset_cov!(sat::SATELLITE{N, T}; reset_calibration = false, σϕ = deg2
     # # Update Covariances 
     # Reset q, increase β, pass C, α, and ϵ
     Σϕ = diagm( σϕ * ones(3) )  # Reset (remember this is Cholesky so no σ²)
-    Σβ = 1.5 * sat.covariance[4:6, 4:6]    # Increase a bit due to unknown propagation in eclipse
+    Σβ = 2.0 * sat.covariance[4:6, 4:6]    # Increase a bit due to unknown propagation in eclipse
     
     # NEED TO CHOLESKY THIS !!!
 
@@ -123,7 +123,7 @@ function estimate(sat::SATELLITE{N, T}, sens::SENSORS{N, T}, noise::MEKF_DATA{T}
 
     # Prepare data 
     sᴵₑ_est = sun_position(t)               # Estimated Sun-Earth vector in inertial frame
-    if eclipse_conical(sᴵₑ_est, vcat([sens.pos;]...)) < 0.001 
+    if eclipse_cylindrical(vcat([sens.pos;]...), sᴵₑ_est) < 0.001 
         @warn "Shouldnt have an eclipse in MEKF!"
     end
 
@@ -253,8 +253,13 @@ function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb:
 
     # Measurement (do NOT normalize this, or at least not the current one)
     Bᴮ_exp, H_mag = mag_measurement(x_pred, Bᴵ, N; calibrate_diodes = calibrate_diodes)
-    I_exp,  H_cur = current_measurement(x_pred, diodes, sᴵ, pos, alb; E_am₀ = E_am₀,
-                                use_albedo = use_albedo, calibrate_diodes = calibrate_diodes)
+
+    #   If in eclipse, dont use I 
+    I_exp,  H_cur = (norm(Ĩ) > 0) ?    current_measurement(x_pred, diodes, sᴵ, pos, alb; E_am₀ = E_am₀,
+                                        use_albedo = use_albedo, calibrate_diodes = calibrate_diodes)  :
+                    (calibrate_diodes) ? (zeros(N), zeros(N, 6 + 3 * N)) : (zeros(N), zeros(N, 6))
+
+                        
 
     # Innovation 
     z = [B̃ᴮ - Bᴮ_exp; Ĩ - I_exp]
