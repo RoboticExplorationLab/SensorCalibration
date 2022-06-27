@@ -10,7 +10,7 @@
 # Move to state machine. Consider splitting by typeof(data). Add in optional arguments.
 function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}, t::Epoch, dt::Real, op_mode::Operation_mode, 
                 flags::FLAGS, idx::Int, data, progress_bar, T_orbit; use_albedo = true, initial_detumble_thresh = deg2rad(15), final_detumble_thresh = deg2rad(8),  # was 25, 10 deg
-                mag_ds_rate = 60, calib_cov_thres = 0.035, mekf_cov_thres = 0.01, σβ = deg2rad(0.1) ) where {T}
+                mag_ds_rate = 60, calib_cov_thres = 0.035, mekf_cov_thres = 0.004, σβ = 3.14e-5 ) where {T}
 
     t += dt   # Update time
 
@@ -63,19 +63,27 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
         if flags.diodes_calibrated && (norm(sensors.gyro - sat_est.state.β) < final_detumble_thresh)
             flags.final_detumble = true
 
-            next_mode = mekf 
-            data = MEKF_DATA()
-            q = run_triad(sensors, sat_est, t, flags.in_sun)  # x.q
-            reset_cov!(sat_est; reset_calibration = false)
-            sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
+            if !(flags.in_sun)
+                next_mode = chill
+            else
+                next_mode = mekf 
+                data = MEKF_DATA()
+                q = run_triad(sensors, sat_est, t, flags.in_sun)  # x.q
+                reset_cov!(sat_est; reset_calibration = false)
+                sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
+            end
 
         elseif !flags.diodes_calibrated && (norm(sensors.gyro) < initial_detumble_thresh)
             flags.init_detumble  = true 
 
-            next_mode = mag_cal 
-            Bᴵ_pred = IGRF13(sensors.pos, t)
-            N_samples = Int(round(2 * T_orbit / (mag_ds_rate)))
-            data = MAG_CALIBRATOR(N_samples, vcat([sensors.magnetometer;]...), Bᴵ_pred);
+            if !(flags.in_sun)
+                next_mode = chill
+            else
+                next_mode = mag_cal 
+                Bᴵ_pred = IGRF13(sensors.pos, t)
+                N_samples = Int(round(2 * T_orbit / (mag_ds_rate)))
+                data = MAG_CALIBRATOR(N_samples, vcat([sensors.magnetometer;]...), Bᴵ_pred);
+            end
         else 
             next_mode = detumble # Keep detumbling  
         end 
@@ -166,7 +174,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
                 flags.diodes_calibrated = true 
             end
 
-            notes = "mode: $op_mode \t||ΣC|| = $(norm(sat_est.covariance[7:12, 7:12])) \t ||Σα|| = $(norm(sat_est.covariance[13:18, 13:18])) \t ||Σϵ|| = $(norm(sat_est.covariance[19:24, 19:24]))"
+            notes = "mode: $op_mode \t||Σ|| = $(norm(sat_est.covariance[7:end, 7:end])) \t ||ΣC|| = $(norm(sat_est.covariance[7:12, 7:12])) \t ||Σα|| = $(norm(sat_est.covariance[13:18, 13:18])) \t ||Σϵ|| = $(norm(sat_est.covariance[19:24, 19:24]))"
         end
 
     """ mekf -> finished 
@@ -179,16 +187,21 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
         well as reset_cov! and MEKF_DATA(), none of which are currently being done.
     """
     elseif op_mode == mekf 
-        sat_est = Estimator.estimate(sat_est, sensors, data, alb, t, dt; use_albedo = use_albedo, calibrate_diodes = false)
 
-        if norm(sat_est.covariance[1:6, 1:6]) < mekf_cov_thres 
-            @show "Finished in MEKF!"
-            next_mode = finished 
-        end 
+        if false #!(flags.in_sun)
+            next_mode = chill 
+        else
+            sat_est = Estimator.estimate(sat_est, sensors, data, alb, t, dt; use_albedo = use_albedo, calibrate_diodes = false)
 
-        eq = norm((sat_truth.state.q ⊙ qconj(sat_est.state.q))[2:4])  # Quaternion error
-        eβ = norm( sat_truth.state.β - sat_est.state.β)
-        notes = "Mode: $op_mode \t||Σ|| = $(norm(sat_est.covariance[1:6, 1:6]))\t q Err: $eq\t β Err: $eβ"
+            if norm(sat_est.covariance[1:6, 1:6]) < mekf_cov_thres 
+                @show "Finished in MEKF!"
+                next_mode = finished 
+            end 
+
+            eq = norm((sat_truth.state.q ⊙ qconj(sat_est.state.q))[2:4])  # Quaternion error
+            eβ = norm( sat_truth.state.β - sat_est.state.β)
+            notes = "Mode: $op_mode \t||Σ|| = $(norm(sat_est.covariance[1:6, 1:6]))\t q Err: $eq\t β Err: $eβ"
+        end
 
     elseif op_mode == finished 
         # Dont do anything
@@ -198,7 +211,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
     end
 
     ### Update state 
-    x⁺ = rk4(sat_truth.J, x, u, t, dt; σβ = 0.0) # quat is normalized inside rk4 
+    x⁺ = rk4(sat_truth.J, x, u, t, dt; σβ = σβ) # quat is normalized inside rk4 
 
     # Update sat_truth state to match 
     new_sat_state = SAT_STATE(x⁺.q, x⁺.β)
@@ -206,6 +219,8 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
 
     ### Display
+    n = "Mode: $op_mode, \t Iter:  $idx" * "\n" * notes
+    # ProgressMeter.next!(progress_bar; show_values = [(:Notes, n)])
     ProgressMeter.next!(progress_bar; showvalues = [(:Mode, op_mode), (:Iteration, idx), (:Notes, notes)])
 
 
@@ -219,6 +234,7 @@ end
 
 function run_triad(sensors::SENSORS{N, T}, sat_est::SATELLITE, t::Epoch, in_sun::Bool) where {N, T}
     (!in_sun) && @warn "run_triad should never be called if not in the sun!"
+    (!in_sun) && @infiltrate
 
     sᴵ_est = sun_position(t) - sensors.pos     # Estimated sun vector 
     Bᴵ_est = IGRF13(sensors.pos, t)            # Estimated magnetic field vector

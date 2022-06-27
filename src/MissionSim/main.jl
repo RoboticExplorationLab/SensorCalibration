@@ -24,6 +24,8 @@ include("Controller/Controller.jl"); using .Controller
 
 @enum(Operation_mode, mag_cal = 1, detumble, diode_cal, mekf, chill, finished)   
 Base.to_index(om::Operation_mode) = Int(s)
+RecipesBase.plot(m::Vector{Operation_mode}) =  plot(Int.(m), yticks = ([1:6;], ["Mag", "Det", "Dio", "MEKF", "Chi", "Fin"]))
+
 include("state_machine.jl")
 
 
@@ -32,14 +34,12 @@ include("state_machine.jl")
 ℓ is max sim length """
 # Add in commands for different starting modes, noise, etc... # NumOrbits, whether it is detumbled and bias_less\
 # Add in verbose for showing plots or not (used for monte carlo)
-@info "No noise, no albedo, no bias (?)"
-@info "Using paper values for (ang vel, noise)"
+@info "No noise, using true ecl" # no gyro bias
 function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2) 
     ##### INITIALIZE ##### 
 
     # Get initial state (enviroment)
-    x₀, T_orbit = get_initial_state(; bias_less = false, detumbled = false)
-    # x₀ = STATE(x₀.r, x₀.v, x₀.q, SVector{3, Float64}(0.0, deg2rad(0.5), 0.0), x₀.β); @info "Low spin!"
+    x₀, T_orbit = get_initial_state(; bias_less = true, detumbled = false)
 
     #   Make sure that the initial environment state matches the true satellite state
     sat_state_truth = SAT_STATE(; q = x₀.q, β = x₀.β)
@@ -47,12 +47,12 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2)
 
     sat_est   = SATELLITE(; J = sat_truth.J, sta = SAT_STATE(; ideal = true), mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true), cov = sat_truth.covariance)
     x, t = x₀, t₀
-    ℓ = Int(round(3.0 * T_orbit / dt))  # MAX length of sim, in time steps
+    ℓ = Int(round(3.5 * T_orbit / dt))  # MAX length of sim, in time steps
 
     alb = get_albedo(2);  # Set up REFL data
 
     # Allocate the history vectors
-    truth, sensor, ecl, noise = generate_measurements(sat_truth, alb, x, t₀, dt; use_albedo = false)
+    truth, sensor, ecl, noise = generate_measurements(sat_truth, alb, x, t₀, dt; use_albedo = true)
     truths   = [truth   for _ = 1:ℓ]
     sensors  = [sensor  for _ = 1:ℓ]
     ecls     = zeros(ℓ)
@@ -74,7 +74,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2)
 
     ## Start with Diode Cal 
     # op_mode = chill; flags.init_detumble = true; flags.magnetometer_calibrated = true; data = nothing;
-        # sat_est = SATELLITE(sat_est.J, sat_truth.magnetometer, sat_est.diodes, sat_est.state, sat_est.covariance)
+    #     sat_est = SATELLITE(sat_est.J, sat_truth.magnetometer, sat_est.diodes, sat_est.state, sat_est.covariance)
 
     
     ## Start with Detumble (Round II)
@@ -94,16 +94,19 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2)
         # Step
         sat_truth, sat_est, x, t, op_mode, data, truth, sensor, ecl, noise  = step(sat_truth, sat_est, alb, x, t, 
                                                                     dt, op_mode, flags, i, data, 
-                                                                    progress_bar, T_orbit; use_albedo = false, σβ = 0.0)
+                                                                    progress_bar, T_orbit; use_albedo = true) # σβ = 0.0)
 
         # Evaluate detumbling 
-        (prev_mode == detumble) && (op_mode != detumble) && detumbler_report(states[1:i], sensors[1:i])
+        (prev_mode == detumble) && (op_mode != detumble) && detumbler_report(states[1:i - 1], sensors[1:i - 1])
 
         # Evaluate performance of magnetometer calibration 
         (prev_mode ==   mag_cal) && (op_mode != mag_cal) && magnetometer_calibration_report(sat_truth, sat_est, sat_ests[1])
 
         # Evaluate performance of diode calibration 
         (prev_mode == diode_cal) && (op_mode != diode_cal) && (flags.diodes_calibrated) && diode_calibration_report(sat_truth, sat_ests[1:i-1]) 
+
+        # Evaluate performance of MEKF
+        (prev_mode == mekf) && (op_mode != mekf) && (flags.diodes_calibrated) && mekf_report(states[1:i-1], sat_ests[1:i-1]) 
 
         # Update histories
         truths[i]    = truth 
@@ -145,7 +148,7 @@ function get_initial_state(; _Re = 6378136.3, detumbled = false, bias_less = fal
     r₀ = SVector{3, Float64}(eci0[1:3])
     v₀ = SVector{3, Float64}(eci0[4:6])
     q₀ = randn(4);  q₀ = SVector{4, Float64}(q₀ / norm(q₀))
-    ω₀ = (detumbled) ? SVector{3, Float64}(0.05 * randn(3)) : SVector{3, Float64}(0.5 * randn(3))
+    ω₀ = (detumbled) ? SVector{3, Float64}(0.05 * randn(3)) : SVector{3, Float64}(0.4 * randn(3))
     β₀ = (bias_less) ? SVector{3, Float64}(0.0, 0.0, 0.0)  : SVector{3, Float64}(rand(Normal(0.0, deg2rad(2)), 3)) # Initial guess can be a bit off
     
     T_orbit = orbit_period(oe0[1])
@@ -209,6 +212,7 @@ end;
 
 
 # Leave in main 
+# Error in mag vec estimation before and after?
 function magnetometer_calibration_report(sat_true, sat_est, sat_init) 
 
     aᶠ, bᶠ, cᶠ = round.(sat_est.magnetometer.scale_factors, sigdigits = 3)
@@ -255,11 +259,11 @@ function diode_calibration_report(sat_true::SATELLITE, est_hist::Vector{SATELLIT
     C, α, ϵ = sat_true.diodes.calib_values, rad2deg.(sat_true.diodes.azi_angles), rad2deg.(sat_true.diodes.elev_angles)
     
     println("_____________________________________DIODES______________________________________")
-    println("____DIODE___|______Truth (C,α,ϵ)_______|______Final Guess______|______Init Guess_______|_____Improved?___")
+    println("___DIODE___|_______Truth (C,α,ϵ)________|__________Final Guess__________|_________Init Guess__________|_____Improved?___")
     for i = 1:6 
         print("     $i     |    $(round(C[i], digits = 2)), $(round(α[i], digits = 2)), $(round(ϵ[i], digits = 2))  \t|")
         print("   $(round(Cf[i], digits = 2)), $(round(αf[i], digits = 2)), $(round(ϵf[i], digits = 2))    \t|")
-        print("   $(round(C₀[i], digits = 2)), $(round(α₀[i], digits = 2)), $(round(ϵ₀[i], digits = 2))    \t|")
+        print("   $(round(C₀[i], digits = 2)), $(round(α₀[i], digits = 2)), $(round(ϵ₀[i], digits = 2))      \t|")
         print( (abs(C₀[i] - C[i]) ≤ abs(Cf[i] - C[i])) ? " No!, " : " Yes!, ")
         print( (abs(α₀[i] - α[i]) ≤ abs(αf[i] - α[i])) ? " No!, " : " Yes!, ")
         println( (abs(ϵ₀[i] - ϵ[i]) ≤ abs(ϵf[i] - ϵ[i])) ? " No! " : " Yes! ")
@@ -268,7 +272,7 @@ function diode_calibration_report(sat_true::SATELLITE, est_hist::Vector{SATELLIT
     
 
     ##### PLOT #####
-    C_off, ϵ_off, α_off = 0.2, 5.0, 5.0
+    C_off, ϵ_off, α_off = 0.2, 6.0, 6.0
     Cps, ϵps, αps = [], [], []
     for i = 1:6
         plot(C_est[i, :], title = "Scale Factor (C)", label = false); 
@@ -308,7 +312,7 @@ function mekf_report(states::Vector{STATE{T}}, est_hist::Vector{SATELLITE{6, T}}
 
     plot( qs, title = "MEKF Report: q", c = [:red :orange :blue :green]);
     plot!(q̂s, c = [:red :orange :blue :green], ls = :dash, label = false);
-    display( plot!(qErrs, label = false, c = :black, ls = :dot, ylim = (-1.5, 1.5)) )
+    display( plot!(qErrs, label = false, c = :black, ls = :dot, ylim = (-1.5, 1.5), lw = 2) )
 
     plot( βs, title = "MEKF Report: β", c = [:red :blue :green]);
     plot!(β̂s, c = [:red :blue :green], ls = :dash, label = false);
@@ -335,10 +339,62 @@ function detumbler_report(states, sensors; τ₁ = deg2rad(15), τ₂ = deg2rad(
     return ωs, ω̂s
 end;
 
+function evaluate_diode_cal(sensors::Vector{SENSORS{6, T}}, truths::Vector{GROUND_TRUTH{6, T}}, d0::DIODES, df::DIODES) where {T}
+    N = size(truths, 1)
+
+    ŝ0 = [estimate_sun_vector(sensors[i], d0) for i = 1:N]
+    ŝf = [estimate_sun_vector(sensors[i], df) for i = 1:N]
+    sᴮ = [truths[i].ŝᴮ for i = 1:N]
+
+    e0 = [ rad2deg( acos(ŝ0[i]' * sᴮ[i])) for i = 1:N]
+    ef = [ rad2deg( acos(ŝf[i]' * sᴮ[i])) for i = 1:N]
+    # e0 = [norm(sᴮ[i] - ŝ0[i]) for i = 1:N]
+    # ef = [norm(sᴮ[i] - ŝf[i]) for i = 1:N]
+
+    # Remove NaNs from eclipses
+    e0 = e0[.!isnan.(e0)]
+    ef = ef[.!isnan.(ef)]
+
+    μ0 = sum(e0) / N; σ0 = std(e0)
+    μf = sum(ef) / N; σf = std(ef)
+
+    println("----- DIODE CALIBRATION -----")
+    println("Initial Error (deg): μ: $μ0,  σ: $σ0")
+    println("Final   Error (deg): μ: $μf,  σ: $σf")
+    println()
+end
+
+
+# CAN ONLY BE RUN 𝑏𝑒𝑓𝑜𝜖𝑒 it has been calibrated, else it is already corrected 
+function evaluate_mag_cal(sensors::Vector{SENSORS{6, T}}, truths::Vector{GROUND_TRUTH{6, T}}, sat0::SATELLITE, satf::SATELLITE) where {T}
+    # Deal with numerical errors 
+    r_acos(x) = (x ≈  1) ? zero(x)    : 
+                (x ≈ -1) ? one(x) * π : acos(x)
+    
+    N = size(truths, 1)
+
+    B̂0 = [correct_magnetometer(sat0, sensors[i].magnetometer) for i = 1:N]
+    B̂f = [correct_magnetometer(satf, sensors[i].magnetometer) for i = 1:N]
+    Bᴮ = [truths[i].Bᴮ for i = 1:N]
+
+    e0 = [ rad2deg( r_acos(normalize(B̂0[i])' * normalize(Bᴮ[i]))) for i = 1:N]
+    ef = [ rad2deg( r_acos(normalize(B̂f[i])' * normalize(Bᴮ[i]))) for i = 1:N]
+
+    μ0 = sum(e0) / N; σ0 = std(e0)
+    μf = sum(ef) / N; σf = std(ef)
+
+    println("----- MAGNETOMETER CALIBRATION -----")
+    println("Initial Error (deg): μ: $μ0,  σ: $σ0")
+    println("Final   Error (deg): μ: $μf,  σ: $σf")
+    println()
+end
+
 
 
 # Random.seed!(565) #1001)
 sat_truth, sat_est, truths, sensors, ecls, noises, states, sat_ests, op_modes = main(); # Adjust arguments to include initial state
+display(plot(states))  #; split = true)
+display(plot(sensors)) #; split = true)
 # mekf_report(states, sat_ests)
 # diode_calibration_report(sat_truth, sat_ests)
 
