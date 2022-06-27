@@ -281,7 +281,7 @@ function cayley_map(q₁, q₂)
 end
 
 function qErr(q₁, q₂)
-    return norm((L(q₁)' * q₂) - [1, 0, 0, 0])
+    return norm((L(q₁)' * q₂)[2:4]) # Need to subtract [±1, 0, 0, 0], but because its unit we just ignore the scalar
 end
 
 """ Hamilton product w/o matrices """
