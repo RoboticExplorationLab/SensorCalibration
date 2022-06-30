@@ -1,4 +1,5 @@
 module CustomStructs
+ 
 
 """ TO Do
  - Decide on default photodiode configuration (in diodes and sat state)
@@ -11,6 +12,8 @@ module CustomStructs
 
 
  try reduce(hcat, v) instead of (hcat([v;]...)) in plotting!
+
+    Make a 'Structs/types' folder and have each one in its own, so we can add more functions cleanly
 """
 
 using EarthAlbedo
@@ -87,6 +90,9 @@ end
     for a set of sun-sensing photodiodes on the CubeSat. Allows for any number of diodes, but 
     the default is six, with one located on each side of the CubeSat. 
 """
+
+@info "Add a plot for diodes (and for each struct)"
+
 struct DIODES{S, T}
     calib_values::SVector{S, T}       #   Calibration value (How much 1 unit of current is scaled by)
     azi_angles::SVector{S, T}         #   Azimuth angle for each photodiode surface normal
@@ -431,25 +437,67 @@ struct SENSORS{N, T}
     pos::SVector{3, T}               # Measured position 
 end
 
-function RecipesBase.plot(s::Vector{SENSORS{6, T}}; split = false, kwargs...) where {T}
+""" Add info! """
+function RecipesBase.plot(s::Vector{SENSORS{6, T}}, sensor::Symbol = :a; kwargs...) where {T}
     N = size(s, 1)
 
     # Split apart and format as matrices for plotting
-    mags = [s[i].magnetometer for i = 1:N]; mags = reduce(hcat, mags)'; # mags = hcat(mags...)';
-    dios = [s[i].diodes       for i = 1:N]; dios = reduce(hcat, dios)'; # dios = hcat(dios...)';
-    gyrs = [s[i].gyro         for i = 1:N]; gyrs = reduce(hcat, gyrs)'; # gyrs = hcat(gyrs...)';
-    poss = [s[i].pos          for i = 1:N]; poss = reduce(hcat, poss)'; # poss = hcat(poss...)';
+    if sensor == :a
+        mags = [s[i].magnetometer for i = 1:N]; mags = reduce(hcat, mags)'; # mags = hcat(mags...)';
+        dios = [s[i].diodes       for i = 1:N]; dios = reduce(hcat, dios)'; # dios = hcat(dios...)';
+        gyrs = [s[i].gyro         for i = 1:N]; gyrs = reduce(hcat, gyrs)'; # gyrs = hcat(gyrs...)';
+        poss = [s[i].pos          for i = 1:N]; poss = reduce(hcat, poss)'; # poss = hcat(poss...)';
 
-    # Make the plots
-    pM = plot(mags, title = "Magnetometers", xlabel = "Index", ylabel = "Mag Field (μT)",   label = ["x" "y" "z"]; kwargs...)
-    pD = plot(dios, title = "Diodes",        xlabel = "Index", ylabel = "Current (A?)",                        ; kwargs...)
-    pG = plot(gyrs, title = "Gyroscope",     xlabel = "Index", ylabel = "Ang Vel (rad/s)", label = ["x" "y" "z"]; kwargs...)
-    pP = plot(poss, title = "Position",      xlabel = "Index", ylabel = "Position (m)",    label = ["x" "y" "z"]; kwargs...)
-
-    if split  # Return each plot separately
-        return pM, pD, pG, pP
-    else      # Return one plot containing subplots
+        # Make the plots
+        pM = plot(mags, title = "Magnetometers", xlabel = "Index", ylabel = "Mag Field (μT)",   label = ["x" "y" "z"]; kwargs...)
+        pD = plot(dios, title = "Diodes",        xlabel = "Index", ylabel = "Current (A?)",                         ; kwargs...)
+        pG = plot(gyrs, title = "Gyroscope",     xlabel = "Index", ylabel = "Ang Vel (rad/s)", label = ["x" "y" "z"]; kwargs...)
+        pP = plot(poss, title = "Position",      xlabel = "Index", ylabel = "Position (m)",    label = ["x" "y" "z"]; kwargs...)
         return plot(pM, pD, pG, pP, plot_title = "Sensors", layout = (2, 2))
+    
+    elseif sensor == :m 
+        mags = [s[i].magnetometer for i = 1:N]; mags = reduce(hcat, mags)';
+        ms = []
+        for i = 1:3 
+            m = plot(mags[:, i])
+            push!(ms, m)
+        end
+
+        return plot(ms..., plot_title = "Magnetometer Measurements", layout = 3)
+
+    elseif sensor == :d
+        dios = [s[i].diodes for i = 1:N]; dios = reduce(hcat, dios)'; 
+        ds = []
+        nd = size(s[1].diodes, 1)
+        for i = 1:nd
+            d = plot(dios[:, i])
+            push!(ds, d)
+        end
+        return plot(ds..., plot_title = "Diode Measurements", layout = nd) #(3, 2))
+        
+    elseif sensor == :g 
+        gyrs = [s[i].gyro         for i = 1:N]; gyrs = reduce(hcat, gyrs)';
+        gs = []
+        labels = ["x", "y", "z"]
+        for i = 1:3 
+            g = plot(gyrs[:, i], label = labels[i])
+            push!(gs, g)
+        end
+        return plot(gs..., plot_title = "Gyro Measurements", layout = 3)
+
+    elseif sensor == :p
+        poss = [s[i].pos          for i = 1:N]; poss = reduce(hcat, poss)';
+        ps = []
+        labels = ["x", "y", "z"]
+        for i = 1:3 
+            p = plot(poss[:, i], label = labels[i])
+            push!(ps, p)
+        end
+        return plot(ps..., plot_title = "Position Measurements", layout = 3)
+
+    else 
+        println("Warning! Symbol $sensor not supported yet!")
+        println("\tAvailable symbols: a, m, d, g, p")
     end
 end
 
@@ -617,30 +665,84 @@ function x(s::STATE{T}) where {T}
 end
 
 #NOT efficient, but whatever
-function RecipesBase.plot(s::Vector{STATE{T}}; ds = 1, split = false, kwargs...) where {T}
+function RecipesBase.plot(s::Vector{STATE{T}}, state = :a, ds = 1, kwargs...) where {T}
     N = size(s, 1)
 
-    # Split apart and format as matrices for plotting
-    rs = [vcat([s[i].r;]...) for i = 1:ds:N]; rs = hcat(rs...)';
-    vs = [vcat([s[i].v;]...) for i = 1:ds:N]; vs = hcat(vs...)';
-    qs = [vcat([s[i].q;]...) for i = 1:ds:N]; qs = hcat(qs...)';  
-    ωs = [vcat([s[i].ω;]...) for i = 1:ds:N]; ωs = hcat(ωs...)';
-    mag_ω = [norm(s[i].ω) for i = 1:ds:N]
-    βs = [vcat([s[i].β;]...) for i = 1:ds:N]; βs = hcat(βs...)';
+    if state == :a
+        # Split apart and format as matrices for plotting
+        rs = [vcat([s[i].r;]...) for i = 1:ds:N]; rs = hcat(rs...)';
+        vs = [vcat([s[i].v;]...) for i = 1:ds:N]; vs = hcat(vs...)';
+        qs = [vcat([s[i].q;]...) for i = 1:ds:N]; qs = hcat(qs...)';  
+        ωs = [vcat([s[i].ω;]...) for i = 1:ds:N]; ωs = hcat(ωs...)';
+        mag_ω = [norm(s[i].ω) for i = 1:ds:N]
+        βs = [vcat([s[i].β;]...) for i = 1:ds:N]; βs = hcat(βs...)';
 
-    pr = plot(rs, title = "Position (Cart)", xlabel = "Index", ylabel = "Position (m)",    label = ["x" "y" "z"]; kwargs...)
-    pv = plot(vs, title = "Velocity",        xlabel = "Index", ylabel = "Velocity (m/s)",  label = ["x" "y" "z"]; kwargs...)
-    pq = plot(qs, title = "Attitude (quat)", xlabel = "Index",                             label = ["x" "y" "z"]; kwargs...)
-    pω = plot(ωs, title = "Ang Velocity",    xlabel = "Index", ylabel = "Ang Vel (rad/s)", label = ["x" "y" "z"]; kwargs...);
-        pω = plot!(mag_ω, label = "||ω||", c = :black, ls = :dash)
-    pβ = plot(βs, title = "Gyro Bias",       xlabel = "Index", ylabel = "Bias (rad/s)",    label = ["x" "y" "z"]; kwargs...)
-    p   = plot()
+        pr = plot(rs, title = "Position (Cart)", xlabel = "Index", ylabel = "Position (m)",    label = ["x" "y" "z"]; kwargs...)
+        pv = plot(vs, title = "Velocity",        xlabel = "Index", ylabel = "Velocity (m/s)",  label = ["x" "y" "z"]; kwargs...)
+        pq = plot(qs, title = "Attitude (quat)", xlabel = "Index",                             label = ["x" "y" "z"]; kwargs...)
+        pω = plot(ωs, title = "Ang Velocity",    xlabel = "Index", ylabel = "Ang Vel (rad/s)", label = ["x" "y" "z"]; kwargs...);
+            pω = plot!(mag_ω, label = "||ω||", c = :black, ls = :dash)
+        pβ = plot(βs, title = "Gyro Bias",       xlabel = "Index", ylabel = "Bias (rad/s)",    label = ["x" "y" "z"]; kwargs...)
+        p   = plot()
 
-    if split 
-        return pr, pv, pq, pω, pβ
-    else
         return plot(pr, pv, pq, pω, pβ, p, plot_title = "State", layout = (3, 2))
+    elseif state == :r
+        pos = [vcat([s[i].r;]...) for i = 1:ds:N]; pos = hcat(pos...)';
+        rs = []
+        labels = ["x" "y" "z"]
+        for i = 1:3
+            r = plot(pos[:, i], label = labels[i])
+            push!(rs, r)
+        end
+        return plot(rs..., layout = 3, plot_title = "Position (Cart)", xlabel = "Index", ylabel = "Position (m)"; kwargs...)
+
+    elseif state == :v  
+        vels = [vcat([s[i].v;]...) for i = 1:ds:N]; vels = hcat(vels...)';
+        vs = []
+        labels = ["x" "y" "z"]
+        for i = 1:3
+            v = plot(vels[:, i], label = labels[i])
+            push!(vs, v)
+        end
+        return plot(vs..., plot_title = "Velocity", xlabel = "Index", ylabel = "Velocity (m/s)"; kwargs...)
+
+    elseif state == :q 
+        quats = [vcat([s[i].q;]...) for i = 1:ds:N]; quats = hcat(quats...)';
+        qs = []
+        for i = 1:4
+            q = plot(quats[:, i])
+            push!(qs, q)
+        end
+        return plot(qs..., plot_title = "Attitude (quat)", xlabel = "Index", ylabel = "Magnitutde"; kwargs...)
+
+
+    elseif state == :ω 
+        angs = [vcat([s[i].ω;]...) for i = 1:ds:N]; angs = hcat(angs...)';
+        ωs = []
+        labels = ["x" "y" "z"]
+        for i = 1:3
+            ω = plot(angs[:, i], label = labels[i])
+            push!(ωs, ω)
+        end
+        return plot(ωs..., plot_title = "Ang Vel", xlabel = "Index", ylabel = "Vel (rad/s)"; kwargs...)
+
+
+    elseif state == :β
+        bias = [vcat([s[i].β;]...) for i = 1:ds:N]; bias = hcat(bias...)';
+        βs = []
+        labels = ["x" "y" "z"]
+        for i = 1:3
+            β = plot(bias[:, i], label = "labels[i]")
+            push!(βs, β)
+        end
+        return plot(βs..., plot_title = "Gyro Bias", xlabel = "Index", ylabel = "Magnitutde"; kwargs...)
+
+
+    else 
+        println("Warning: State $state is not ready for plotting!")
+        println("\tViable symbols: r, v, q, ω, β, a")
     end
+
 end
 
 """ Normalizes a quaternion """
