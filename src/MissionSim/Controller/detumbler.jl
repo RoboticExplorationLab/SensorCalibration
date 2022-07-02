@@ -1,13 +1,18 @@
-# [src/MissionSim/Controller/detumbler.jl]
+# [src/Controller/detumbler.jl]
 
-# TODO: Calculate the optimal value of κ (Used to be 7e-6, but I estimate it should be large...)
+""" TODO
+ - Calculate the optimal value of κ (Used to be 7e-6, but I estimate it should be larger...)
+ - Finish B-dot
+""" 
 
 using StaticArrays, LinearAlgebra
+
 
 """
       DETUMBLER(ω::SVector, Bᴮ::SVector, dt::Float)
 
-    Simple controller that slows the rotation of the CubeSat.
+    Simple controller that slows the rotation of the CubeSat. Comes with 
+    a randomized constructor.
 """
 struct DETUMBLER{S, T}
 
@@ -22,7 +27,6 @@ struct DETUMBLER{S, T}
 
     function DETUMBLER(_ω, _Bᴮ, _dt) 
         """ Constructor for incorrect types """
-        # @warn "\tDETUMBLER object made without static vectors!"
         S, T = length(_ω), typeof(_ω[1])
         _ω  = SVector{S, T}(_ω)
         _Bᴮ = SVector{S, T}(_Bᴮ)

@@ -1,4 +1,4 @@
-# [src/MissionSim/Controller/Controller.jl]
+# [src/Controller/Controller.jl]
 
 """ To Do:
 
@@ -13,7 +13,7 @@
 
 module Controller
 
-# Because of custom structs, I need to NOT define them again if they have been defined by a different module, but i DO need to define them if they havent been defined
+# Because of the custom structs I am using, I need to NOT define them again if they have been defined by a different module, but i DO need to define them if they havent been defined
 if !(@isdefined STATE)
     try 
         using ..CustomStructs 
@@ -32,5 +32,7 @@ include("detumbler.jl")
 export generate_command   # Interface function that is defined on all controller types
 export DETUMBLER          # Controller that detumbles the CubeSat
 export b_cross
+
+
 
 end
