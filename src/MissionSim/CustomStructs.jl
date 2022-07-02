@@ -16,8 +16,6 @@ module CustomStructs
     Make a 'Structs/types' folder and have each one in its own, so we can add more functions cleanly
 """
 
-@info "Split custom structs into own folders"
-
 using EarthAlbedo
 using SatelliteDynamics
 using StaticArrays, Distributions, LinearAlgebra
@@ -39,8 +37,6 @@ include("CustomStructs/sat_state.jl"); export SAT_STATE, update_state
 include("CustomStructs/satellite.jl"); export SATELLITE 
 include("CustomStructs/sensors.jl");   export SENSORS 
 include("CustomStructs/state.jl");     export STATE 
-
-
 
 
 

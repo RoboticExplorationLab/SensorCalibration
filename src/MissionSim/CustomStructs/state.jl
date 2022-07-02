@@ -64,29 +64,29 @@ function x(s::STATE{T}) where {T}
 end
 
 #NOT efficient, but whatever
-function RecipesBase.plot(s::Vector{STATE{T}}, state = :a, ds = 1, kwargs...) where {T}
-    N = size(s, 1)
+function RecipesBase.plot(s::Vector{STATE{T}}, state = :a; start = 1, stop = nothing, ds = 1, kwargs...) where {T}
+    N = isnothing(stop) ? size(s, 1) : stop 
 
     if state == :a
         # Split apart and format as matrices for plotting
-        rs = [vcat([s[i].r;]...) for i = 1:ds:N]; rs = hcat(rs...)';
-        vs = [vcat([s[i].v;]...) for i = 1:ds:N]; vs = hcat(vs...)';
-        qs = [vcat([s[i].q;]...) for i = 1:ds:N]; qs = hcat(qs...)';  
-        ωs = [vcat([s[i].ω;]...) for i = 1:ds:N]; ωs = hcat(ωs...)';
-        mag_ω = [norm(s[i].ω) for i = 1:ds:N]
-        βs = [vcat([s[i].β;]...) for i = 1:ds:N]; βs = hcat(βs...)';
+        rs = [vcat([s[i].r;]...) for i = start:ds:N]; rs = hcat(rs...)';
+        vs = [vcat([s[i].v;]...) for i = start:ds:N]; vs = hcat(vs...)';
+        qs = [vcat([s[i].q;]...) for i = start:ds:N]; qs = hcat(qs...)';  
+        ωs = [vcat([s[i].ω;]...) for i = start:ds:N]; ωs = hcat(ωs...)';
+        mag_ω = [norm(s[i].ω) for i = start:ds:N]
+        βs = [vcat([s[i].β;]...) for i = start:ds:N]; βs = hcat(βs...)';
 
         pr = plot(rs, title = "Position (Cart)", xlabel = "Index", ylabel = "Position (m)",    label = ["x" "y" "z"]; kwargs...)
         pv = plot(vs, title = "Velocity",        xlabel = "Index", ylabel = "Velocity (m/s)",  label = ["x" "y" "z"]; kwargs...)
         pq = plot(qs, title = "Attitude (quat)", xlabel = "Index",                             label = ["x" "y" "z"]; kwargs...)
-        pω = plot(ωs, title = "Ang Velocity",    xlabel = "Index", ylabel = "Ang Vel (rad/s)", label = ["x" "y" "z"]; kwargs...);
+        pω = plot(rad2deg.(ωs), title = "Ang Velocity",    xlabel = "Index", ylabel = "Ang Vel (rad/s)", label = ["x" "y" "z"]; kwargs...);
             pω = plot!(mag_ω, label = "||ω||", c = :black, ls = :dash)
         pβ = plot(βs, title = "Gyro Bias",       xlabel = "Index", ylabel = "Bias (rad/s)",    label = ["x" "y" "z"]; kwargs...)
         p   = plot()
 
         return plot(pr, pv, pq, pω, pβ, p, plot_title = "State", layout = (3, 2))
     elseif state == :r
-        pos = [vcat([s[i].r;]...) for i = 1:ds:N]; pos = hcat(pos...)';
+        pos = [vcat([s[i].r;]...) for i = start:ds:N]; pos = hcat(pos...)';
         rs = []
         labels = ["x" "y" "z"]
         for i = 1:3
@@ -96,7 +96,7 @@ function RecipesBase.plot(s::Vector{STATE{T}}, state = :a, ds = 1, kwargs...) wh
         return plot(rs..., layout = 3, plot_title = "Position (Cart)", xlabel = "Index", ylabel = "Position (m)"; kwargs...)
 
     elseif state == :v  
-        vels = [vcat([s[i].v;]...) for i = 1:ds:N]; vels = hcat(vels...)';
+        vels = [vcat([s[i].v;]...) for i = start:ds:N]; vels = hcat(vels...)';
         vs = []
         labels = ["x" "y" "z"]
         for i = 1:3
@@ -106,7 +106,7 @@ function RecipesBase.plot(s::Vector{STATE{T}}, state = :a, ds = 1, kwargs...) wh
         return plot(vs..., plot_title = "Velocity", xlabel = "Index", ylabel = "Velocity (m/s)"; kwargs...)
 
     elseif state == :q 
-        quats = [vcat([s[i].q;]...) for i = 1:ds:N]; quats = hcat(quats...)';
+        quats = [vcat([s[i].q;]...) for i = start:ds:N]; quats = hcat(quats...)';
         qs = []
         for i = 1:4
             q = plot(quats[:, i])
@@ -116,20 +116,20 @@ function RecipesBase.plot(s::Vector{STATE{T}}, state = :a, ds = 1, kwargs...) wh
 
 
     elseif state == :ω 
-        angs = [vcat([s[i].ω;]...) for i = 1:ds:N]; angs = hcat(angs...)';
+        angs = [vcat([s[i].ω;]...) for i = start:ds:N]; angs = hcat(angs...)';
         ωs = []
         labels = ["x" "y" "z"]
         for i = 1:3
             ω = plot(rad2deg.(angs[:, i]), label = labels[i])
             push!(ωs, ω)
         end
-        nω = [norm(rad2deg.(angs[i, :])) for i = 1:ds:N]
+        nω = [norm(rad2deg.(angs[i, :])) for i = start:ds:N]
         push!(ωs, plot(nω, title = "Magnitude"))
         return plot(ωs..., plot_title = "Ang Vel", xlabel = "Index", ylabel = "Vel (deg/s)"; kwargs...)
 
 
     elseif state == :β
-        bias = [vcat([s[i].β;]...) for i = 1:ds:N]; bias = hcat(bias...)';
+        bias = [vcat([s[i].β;]...) for i = start:ds:N]; bias = hcat(bias...)';
         βs = []
         labels = ["x" "y" "z"]
         for i = 1:3
