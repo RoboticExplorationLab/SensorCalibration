@@ -73,7 +73,7 @@ function reset_cov!(sat::SATELLITE{N, T}; reset_calibration = false, σϕ = deg2
                         σC = 0.3, σα = deg2rad(9), σϵ = deg2rad(9)) where {N, T}
                         # σC = 0.1, σα = deg2rad(3), σϵ = deg2rad(3)) where {N, T}
     
-    @info "Calling reset cov!"
+    # @info "Calling reset cov!"
     # # Update Covariances 
     # Reset q, increase β, pass C, α, and ϵ
     Σϕ = diagm( σϕ * ones(3) )  # Reset (remember this is Cholesky so no σ²)
@@ -123,7 +123,7 @@ function estimate(sat::SATELLITE{N, T}, sens::SENSORS{N, T}, noise::MEKF_DATA{T}
 
     # Prepare data 
     sᴵₑ_est = sun_position(t)               # Estimated Sun-Earth vector in inertial frame
-    if eclipse_cylindrical(vcat([sens.pos;]...), sᴵₑ_est) < 0.001 
+    if (calibrate_diodes) && (eclipse_cylindrical(vcat([sens.pos;]...), sᴵₑ_est) < 0.001) 
         @warn "Shouldnt have an eclipse in MEKF!"
     end
 
@@ -163,10 +163,7 @@ end
 # ASSUMES SMALL ANGLE APPROXIMATION HOLDS, uses 3-param
 
 # Does having Bᴮ not be unit give it heavy weighting bias or is that taken care of with L?
-"""
-    sqrt_mekf(x, Pchol, alb, ω, Bᴵ, sᴵ, B̃ᴮ, Ĩ, pos, dt, W, V; E_am₀ = 1366.9, use_albedo = true, calibrate_diodes = true)
-    
-"""
+
 
 """
     function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb::ALBEDO, 
@@ -237,7 +234,6 @@ end
     end
 """
 
-
 # With iteration...
 function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb::ALBEDO, 
     ω::SVector{3, T}, Bᴵ::SVector{3, T}, sᴵ::SVector{3, T}, B̃ᴮ::SVector{3, T}, 
@@ -257,9 +253,7 @@ function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb:
     #   If in eclipse, dont use I 
     I_exp,  H_cur = (norm(Ĩ) > 0) ?    current_measurement(x_pred, diodes, sᴵ, pos, alb; E_am₀ = E_am₀,
                                         use_albedo = use_albedo, calibrate_diodes = calibrate_diodes)  :
-                    (calibrate_diodes) ? (zeros(N), zeros(N, 6 + 3 * N)) : (zeros(N), zeros(N, 6))
-
-                        
+                    (calibrate_diodes) ? (zeros(N), zeros(N, 6 + 3 * N)) : (zeros(N), zeros(N, 6))                        
 
     # Innovation 
     z = [B̃ᴮ - Bᴮ_exp; Ĩ - I_exp]
@@ -278,6 +272,28 @@ function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb:
     Pchol⁺ = qrᵣ([ Pchol_pred * (I - L * H)'; V * L']); 
 
 
+    # ##### REMOVE! #####
+
+    # # rg = rank(OG)
+    # if W0 == 0.0
+    #     global W0 = (A')^(0) * H' * H * (A^(0))
+    #     global ii = 1
+    # else
+    #     global W0 += (A')^(ii) * H' * H * (A^(ii))
+    #     global ii +=1
+    # end
+
+    # if (ii > 100)
+        
+    #     ev = eigvals(W0)
+    #     pd = isposdef(W0)
+    #     ss = ishermitian(W0)
+        
+    #     @infiltrate
+
+    # end
+
+    # ###################
 
     
     # ### ITERATION 2 ###
@@ -313,6 +329,7 @@ function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb:
 end
 
 
+
 # Add in new tests, comment and clean it up 
 # ForwardDIff test does NOT pass (especially the bias term. May be 'good enough'?)
 # PANIC - I dont know if we should be using ±hat(γ) b/c Zacs notes say minus (Depends on if we use ± in Rodrigues)
@@ -340,9 +357,11 @@ end
 
         # Calculate Jacobian ∂f/∂x
 
-        γ̂ = hat(γ / nγ)  # Skew-symmetric matrix 
+        γ̂ = -hat(γ / nγ)  # Skew-symmetric matrix 
         R = (nγ == 0.0) ? I(3)  :  # Avoid the divide-by-zero error
-                        I(3) - (γ̂ ) * sin(nγ) + ((γ̂ )^2) * (1 - cos(nγ)); # Rodrigues formula
+                          I(3) - (γ̂ ) * sin(θ) + ((γ̂ )^2) * (1 - cos(θ)); # Rodrigues formula
+
+        @debug R ≈ exp(-hat(ω - x.β) * dt)
                         
         A = zeros(T, 6, 6)     # Jacobian of f(x) wrt x,   A  =   [R   -dt I₃;  0₃  I₃]
         A[1:3, 1:3] .= R  # or -hat(ω?)
@@ -395,14 +414,14 @@ end
 
         # Calculate Jacobian ∂f/∂x
 
-        γ̂ = hat(γ / nγ)  # Skew-symmetric matrix 
-        R = (nγ == 0.0) ? I(3)  :  # Avoid the divide-by-zero error
-                          I(3) + (γ̂ ) * sin(nγ) + ((γ̂ )^2) * (1 - cos(nγ)); # Rodrigues formula
-
-        @debug R == exp(nγ * hat(γ / nγ) )
-                        
+        # θ = dt * nγ
+        # γ̂ = -hat(γ / nγ)  # Skew-symmetric matrix 
+        # R = (nγ == 0.0) ? I(3)  :  # Avoid the divide-by-zero error
+        #                   I(3) - (γ̂ ) * sin(θ) + ((γ̂ )^2) * (1 - cos(θ)); # Rodrigues formula
+        # @debug R ≈ exp(-hat(ω - x.β) * dt) "Error in R!"
+                
+        
         A = zeros(T, 6, 6)     # Jacobian of f(x) wrt x,   A  =   [R   -dt I₃;  0₃  I₃]
-
 
         _nextq_q(_q) = nextq(_q, ω, x.β, dt)[1]
         _nextq_β(_β) = nextq(x.q, ω, _β, dt)[1]
@@ -554,7 +573,7 @@ end
 
 
 
-
+@info "Compute diode albedo in Measurement too"
 function compute_diode_albedo(data::Matrix{T}, cell_centers_ecef::Array{T, 3}, surface_normal::SVector{3, T}, sat_pos::SVector{3, T}) where {T}
 
     Nlat, Nlon = size(data)

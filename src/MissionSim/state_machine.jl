@@ -9,15 +9,16 @@
 # Given a state, generate measurements. Estimate/Control. Generate and return next step (maybe flip that to be first?)
 # Move to state machine. Consider splitting by typeof(data). Add in optional arguments.
 function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}, t::Epoch, dt::Real, op_mode::Operation_mode, 
-                flags::FLAGS, idx::Int, data, progress_bar, T_orbit; use_albedo = true, initial_detumble_thresh = deg2rad(15), final_detumble_thresh = deg2rad(8),  # was 25, 10 deg
-                mag_ds_rate = 60, calib_cov_thres = 0.035, mekf_cov_thres = 0.004, σβ = 3.14e-5 ) where {T}
+                flags::FLAGS, idx::Int, progress_bar, T_orbit, data; use_albedo = true, initial_detumble_thresh = deg2rad(15), final_detumble_thresh = deg2rad(8),  # was 25, 10 deg
+                mag_ds_rate = 60, calib_cov_thres = 0.036, mekf_cov_thres = 0.004, σβ = 3.14e-5, σB = deg2rad(0.25), σ_gyro = 0.5e-4, 
+                σr = 5e3, σ_current = 0.0 ) where {T}
 
     t += dt   # Update time
 
     ### Generate measurements
 
     # No noise!
-    truth, sensors, ecl, noise = generate_measurements(sat_truth, alb, x, t, dt; use_albedo = use_albedo, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0);
+    truth, sensors, ecl, noise = generate_measurements(sat_truth, alb, x, t, dt; use_albedo = use_albedo, σB = σB, σ_gyro = σ_gyro, σr = σr, σ_current = σ_current);
     
     # Update measurements as time goes on 
     flags.magnetometer_calibrated && (sensors = correct_magnetometer(sat_est, sensors))
@@ -27,12 +28,16 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
     #     correct_gyroscope(sat_est, sensors)
     # end
 
-    flags.in_sun = (flags.in_sun  &&  flags.diodes_calibrated) ? norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.75 :
-                   (flags.in_sun  && !flags.diodes_calibrated) ? norm(sensors.diodes) > 0.7 :
-                   (!flags.in_sun &&  flags.diodes_calibrated) ? norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.9 :
-                                                                 norm(sensors.diodes) > 0.8
-                                                                 
-    flags.in_sun = ecl ### REMOVE !    
+    ##### MAYBE ACCUMULATE AVERAGES DURING MAG CAL AND USE DEVIATION FROM MEAN?????
+    ##### -OR- hope my cal is good enough i can always do diodes ./ calib_values...?
+    # flags.in_sun = (flags.in_sun  &&  flags.diodes_calibrated) ? norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.8 :
+    #                (flags.in_sun  && !flags.diodes_calibrated) ? norm(sensors.diodes) > 0.7 :
+    #                (!flags.in_sun &&  flags.diodes_calibrated) ? norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.9 :
+    #                                                              norm(sensors.diodes) > 0.8
+                                      
+    flags.in_sun = (flags.in_sun) ? norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.7 :
+                                    norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.8 
+    # flags.in_sun = ecl ### REMOVE !    
 
 
     ### Estimate & Control (make each of these sub functions...?)
@@ -194,7 +199,6 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             sat_est = Estimator.estimate(sat_est, sensors, data, alb, t, dt; use_albedo = use_albedo, calibrate_diodes = false)
 
             if norm(sat_est.covariance[1:6, 1:6]) < mekf_cov_thres 
-                @show "Finished in MEKF!"
                 next_mode = finished 
             end 
 
@@ -225,8 +229,8 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
 
     ### REMOVE - DEBUGGING CHECKS! 
-    ((minimum(sat_est.diodes.calib_values) ≤ 0.0) || (maximum(sat_est.diodes.calib_values) > 5) ) && @infiltrate
-    ((norm(cayley_map(sat_truth.state.q, x⁺.q)) > 1e-5) || (sat_truth.state.β ≉ x⁺.β) ) && @infiltrate
+    # ((minimum(sat_est.diodes.calib_values) ≤ 0.0) || (maximum(sat_est.diodes.calib_values) > 5) ) && @infiltrate
+    # ((norm(cayley_map(sat_truth.state.q, x⁺.q)) > 1e-5) || (sat_truth.state.β ≉ x⁺.β) ) && @infiltrate
 
     return sat_truth, sat_est, x⁺, t, next_mode, data, truth, sensors, ecl, noise
 end
@@ -292,6 +296,7 @@ end
 # The Pseudo-inv method would probably be sketchy IRL because when the sun isn't illuminating 3+ diodes it would fail
 
 # This method does not rely on knowledge of photodiode setup in advance
+# Also, even with perfect estimates for the diode parameters this still gets ~2* error
 function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
     n(α, ϵ) = [sin(pi/2 - ϵ)*cos(α); sin(pi/2 - ϵ) * sin(α); cos(pi/2 - ϵ)]
 

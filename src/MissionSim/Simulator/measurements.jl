@@ -16,6 +16,8 @@
       - Should get_calib_matrix be static?
 """
 
+
+# If these change, change the state_machine defaults as well.
 # σ_current, gyro  no longer scales, but matches the values in On-Orbit. I do noise on mag with rotation, not noise, but I ran some 
 #   tests to determine what the angular distance corresponded to 0.25deg
 """
@@ -51,8 +53,8 @@
 
 """
 function generate_measurements(sat::SATELLITE, alb::ALBEDO, x::STATE, t::Epoch, dt::T; 
-             E_am₀ = 1366.9, σB = deg2rad(0.25), σ_gyro = 0.5e-4, 
-             σr = 5e3, σ_current = 0.05, use_albedo = true) where {T}
+                                E_am₀ = 1366.9, σB = deg2rad(0.25), σ_gyro = 0.5e-4, 
+                                σr = 5e3, σ_current = 0.05, use_albedo = true) where {T}
 
     ᴮQᴵ = quat2rot(x.q)'  # Compute once and pass in 
 
@@ -248,7 +250,6 @@ function diode_measurement(sat::SATELLITE{N, T}, alb::ALBEDO, x::STATE{T}, ecl::
         return SVector{N, T}(I), SVector{N, T}(Ĩ), SVector{N, T}(ηI)
     end
 end 
-
 
 
 ####################
