@@ -19,7 +19,7 @@
         lat_step = 1.0 * scale
         lon_step = 1.25 * scale
 
-        refl = load_refl("../src/MissionSim/data/refl.jld2", scale)  # Not sure this will quite work...
+        refl = load_refl("../src/data/refl.jld2", scale)  # Not sure this will quite work...
         cell_centers_ecef = get_albedo_cell_centers(lat_step, lon_step) 
         return Simulator.ALBEDO(refl, cell_centers_ecef)
     end;

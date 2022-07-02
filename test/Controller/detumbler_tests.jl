@@ -1,10 +1,10 @@
 # [test/Controller/detumbler_tests.jl]
 
 # using Test, BenchmarkTools, SatelliteDynamics
-# include("../../src/MissionSim/Controller/detumbler.jl")
+# include("../../src/Controller/detumbler.jl")
 # include("../SimpleOrbit.jl")
-# include("../../src/MissionSim/mag_field.jl")
-# include("../../src/MissionSim/quaternions.jl")
+# include("../../src/mag_field.jl")
+# include("../../src/quaternions.jl")
 
 @testset "Detumbler Tests" begin
 

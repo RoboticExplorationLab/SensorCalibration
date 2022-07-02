@@ -86,7 +86,7 @@
 
     @testset "  Check angular velocity decreases" begin 
         if !(@isdefined generate_command)
-            include("../../src/MissionSim/Controller/Controller.jl"); using .Controller
+            include("../../src/Controller/Controller.jl"); using .Controller
         end
 
         # Set up initial state  

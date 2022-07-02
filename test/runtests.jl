@@ -5,16 +5,16 @@ using Plots, EarthAlbedo, JLD2
 using StaticArrays, LinearAlgebra, SatelliteDynamics, Distributions
 using ForwardDiff 
 
-include("../src/MissionSim/CustomStructs.jl");         using .CustomStructs
-include("../src/MissionSim/Simulator/Simulator.jl");   using .Simulator
-include("../src/MissionSim/Estimator/Estimator.jl");   using .Estimator 
-include("../src/MissionSim/Controller/Controller.jl"); using .Controller
+include("../src/CustomStructs.jl");         using .CustomStructs
+include("../src/Simulator/Simulator.jl");   using .Simulator
+include("../src/Estimator/Estimator.jl");   using .Estimator 
+include("../src/Controller/Controller.jl"); using .Controller
 
 
 include("SimpleOrbit.jl")
 
-include("../src/MissionSim/quaternions.jl");
-include("../src/MissionSim/mag_field.jl");
+include("../src/quaternions.jl");
+include("../src/mag_field.jl");
 
 
 

@@ -3,7 +3,7 @@
 #########
 
 
-path = "../src/MissionSim/"
+path = "../src/"
 ##### Stuff needed to run in isolation ##########################################
 # using Infiltrator, Test
 # using StaticArrays, SatelliteDynamics, EarthAlbedo 

@@ -8,7 +8,7 @@ and control inputs are only allowed for the orientation.
 using LinearAlgebra, StaticArrays
 using Plots
 using Test
-include("../src/MissionSim/quaternions.jl")
+include("../src/quaternions.jl")
 
 
 μ = 3.9860044188e14

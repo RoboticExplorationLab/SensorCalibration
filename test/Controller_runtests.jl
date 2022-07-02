@@ -1,17 +1,17 @@
 # [tests/Controller_runtests.jl]
 
-""" Runs all tests for files in ../src/MissionSim/Controller/ """
+""" Runs all tests for files in ../src/Controller/ """
 
 using Test, BenchmarkTools
 using LinearAlgebra, StaticArrays, SatelliteDynamics
 
-include("../src/MissionSim/Controller/Controller.jl"); using .Controller
+include("../src/Controller/Controller.jl"); using .Controller
 
 # Ensure the appropriate scripts are included, but only once (important for struct declarations)
 (@isdefined STATE)       ? nothing : using .Controller.CustomStructs
 (@isdefined SimpleOrbit) ? nothing : include("SimpleOrbit.jl");
-(@isdefined IGRF13)      ? nothing : include("../src/MissionSim/mag_field.jl");
-(@isdefined qdot)        ? nothing : include("../src/MissionSim/quaternions.jl");
+(@isdefined IGRF13)      ? nothing : include("../src/mag_field.jl");
+(@isdefined qdot)        ? nothing : include("../src/quaternions.jl");
 
 # Run Tests
 include("Controller/detumbler_tests.jl");

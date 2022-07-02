@@ -1,4 +1,4 @@
-# [src/MissionSim/Simulator/simulator_tests.jl]
+# [src/Simulator/simulator_tests.jl]
 
 """ To Do:
   - to avoid scope conflicts, I am just calling CustomStructs through Simulator rn...
@@ -8,11 +8,11 @@
 # using Test, BenchmarkTools
 # using StaticArrays, LinearAlgebra, Plots, SatelliteDynamics, EarthAlbedo, JLD2, Distributions
 
-# include("../../src/MissionSim/CustomStructs.jl");  using .CustomStructs 
-# include("../../src/MissionSim/Simulator/dynamics.jl")
-# include("../../src/MissionSim/Simulator/measurements.jl")
-# include("../../src/MissionSim/quaternions.jl")
-# include("../../src/MissionSim/mag_field.jl")
+# include("../../src/CustomStructs.jl");  using .CustomStructs 
+# include("../../src/Simulator/dynamics.jl")
+# include("../../src/Simulator/measurements.jl")
+# include("../../src/quaternions.jl")
+# include("../../src/mag_field.jl")
 #################################################################################################
 
 
@@ -30,7 +30,7 @@
         lat_step = 1.0 * scale
         lon_step = 1.25 * scale
 
-        refl = load_refl("../src/MissionSim/data/refl.jld2", scale)  
+        refl = load_refl("../src/data/refl.jld2", scale)  
         cell_centers_ecef = get_albedo_cell_centers(lat_step, lon_step) 
         return ALBEDO(refl, cell_centers_ecef)
     end;

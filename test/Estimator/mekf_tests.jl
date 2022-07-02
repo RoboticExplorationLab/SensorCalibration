@@ -17,11 +17,11 @@
 # using StaticArrays, LinearAlgebra
 # using ForwardDiff, Plots, EarthAlbedo, SatelliteDynamics, JLD2
 
-# include("../../src/MissionSim/CustomStructs.jl");   using .CustomStructs 
-# include("../../src/MissionSim/Estimator/mekf.jl");
+# include("../../src/CustomStructs.jl");   using .CustomStructs 
+# include("../../src/Estimator/mekf.jl");
 
-# include("../../src/MissionSim/quaternions.jl")
-# include("../../src/MissionSim/mag_field.jl")
+# include("../../src/quaternions.jl")
+# include("../../src/mag_field.jl")
 # # # (Also change the path in get_albedo)
 ##################################################################################
 
@@ -41,7 +41,7 @@
         lat_step = 1.0 * scale
         lon_step = 1.25 * scale
 
-        refl = load_refl("../src/MissionSim/data/refl.jld2", scale)  
+        refl = load_refl("../src/data/refl.jld2", scale)  
         cell_centers_ecef = get_albedo_cell_centers(lat_step, lon_step) 
         return ALBEDO(refl, cell_centers_ecef)
     end;

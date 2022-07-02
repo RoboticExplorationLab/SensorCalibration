@@ -7,8 +7,8 @@
 # using Test, BenchmarkTools
 # using StaticArrays, Plots, LinearAlgebra, Distributions, ForwardDiff
 
-# include("../../src/MissionSim/CustomStructs.jl");  using .CustomStructs 
-# include("../../src/MissionSim/Estimator/magnetometer_calibration.jl")
+# include("../../src/CustomStructs.jl");  using .CustomStructs 
+# include("../../src/Estimator/magnetometer_calibration.jl")
 #############################################################################
 
 

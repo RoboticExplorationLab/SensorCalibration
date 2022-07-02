@@ -11,7 +11,7 @@ using ProgressMeter
 
 @enum(Operation_mode, mag_cal = 1, detumble, diode_cal, mekf, chill, finished)
 Base.to_index(om::Operation_mode) = Int(s)
-include("../src/MissionSim/state_machine.jl")
+include("../src/state_machine.jl")
 
 function get_initial_state(; _Re = 6378136.3, detumbled = false, bias_less = false) 
     ecc = 0.0001717 + 0.00001 * randn()
@@ -48,7 +48,7 @@ function get_albedo(scale = 1)
     lat_step = 1.0 * scale
     lon_step = 1.25 * scale
 
-    refl = load_refl("../src/MissionSim/data/refl.jld2", scale)  
+    refl = load_refl("../src/data/refl.jld2", scale)  
     cell_centers_ecef = get_albedo_cell_centers(lat_step, lon_step) 
     return Simulator.ALBEDO(refl, cell_centers_ecef)
 end;

@@ -9,7 +9,7 @@ using Test
 
 @testset "Quaternions" begin 
     using LinearAlgebra, BenchmarkTools, StaticArrays
-    (@isdefined qdot) ? nothing : include("../src/MissionSim/quaternions.jl");
+    (@isdefined qdot) ? nothing : include("../src/quaternions.jl");
 
     function rand_quat() 
         q = randn(4)
