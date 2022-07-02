@@ -16,6 +16,8 @@
       - Should get_calib_matrix be static?
 """
 
+@info "Remove Infiltrator!"; using Infiltrator
+
 
 # If these change, change the state_machine defaults as well.
 # σ_current, gyro  no longer scales, but matches the values in On-Orbit. I do noise on mag with rotation, not noise, but I ran some 
@@ -53,7 +55,7 @@
 
 """
 function generate_measurements(sat::SATELLITE, alb::ALBEDO, x::STATE, t::Epoch, dt::T; 
-                                E_am₀ = 1366.9, σB = deg2rad(0.25), σ_gyro = 0.5e-4, 
+                                E_am₀ = 1366.9, σB = deg2rad(0.25), σ_gyro = 5e-2, 
                                 σr = 5e3, σ_current = 0.05, use_albedo = true) where {T}
 
     ᴮQᴵ = quat2rot(x.q)'  # Compute once and pass in 
@@ -110,7 +112,6 @@ function mag_measurement(sat::SATELLITE, x::STATE, ᴮQᴵ::SMatrix{3, 3, T, 9},
     return Bᴵ, Bᴮ, B̃ᴮ
 end
 
-# no longer have a μ_scale
 """ 
     Generates the gyroscope measurement by adding noise to the true values.
 
@@ -128,9 +129,9 @@ end
       - ηw: Gyroscope noise                                                            | [3,] (Static)
           (Note that this is really just tracked for debugging purposes)
 """
-function gyro_measurement(x::STATE{T}; σ_scale = 0.005) where {T}
+function gyro_measurement(x::STATE{T}; σ_scale = 0.05) where {T}
 
-    ηω = rand(Normal(0.0, σ_scale * norm(x.ω)), 3)  # Noise scales with actual value
+    ηω = rand(Normal(0.0, σ_scale), 3)  # Noise scales with actual value
 
     ω̃  = x.ω .+ x.β .+ ηω
 

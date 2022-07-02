@@ -229,7 +229,8 @@ function monte_carlo(N = 10)
     es₀s, eB₀s    = zeros(N), zeros(N)
     for i = 1:N
         println("\n---------  $i --------")
-        results = main(; verbose = false, num_orbits = 1.5, initial_state = diode_cal, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0);
+        # results = main(; verbose = false, num_orbits = 1.5, initial_state = diode_cal, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0);
+        results = main(; verbose = false)
         eq = mekf_report(results; verbose = false)
         es₀, es = evaluate_diode_cal(results; verbose = false)
         eB₀, eB = evaluate_mag_cal(results; verbose = false)

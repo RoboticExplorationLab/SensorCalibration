@@ -11,7 +11,7 @@
 function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}, t::Epoch, dt::Real, op_mode::Operation_mode, 
                 flags::FLAGS, idx::Int, progress_bar, T_orbit, data; use_albedo = true, initial_detumble_thresh = deg2rad(15), final_detumble_thresh = deg2rad(8),  # was 25, 10 deg
                 mag_ds_rate = 60, calib_cov_thres = 0.036, mekf_cov_thres = 0.004, σβ = 3.14e-5, σB = deg2rad(0.25), σ_gyro = 0.5e-4, 
-                σr = 5e3, σ_current = 0.0 ) where {T}
+                σr = 5e3, σ_current = 0.05 ) where {T}
 
     t += dt   # Update time
 
@@ -19,7 +19,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
     # No noise!
     truth, sensors, ecl, noise = generate_measurements(sat_truth, alb, x, t, dt; use_albedo = use_albedo, σB = σB, σ_gyro = σ_gyro, σr = σr, σ_current = σ_current);
-    
+
     # Update measurements as time goes on 
     flags.magnetometer_calibrated && (sensors = correct_magnetometer(sat_est, sensors))
 

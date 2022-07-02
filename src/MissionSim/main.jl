@@ -36,14 +36,13 @@ include("reports.jl")
 """ x₀ = initial state (eci is r, v); 
 ℓ is max sim length """
 # Add in verbose for showing plots or not (used for monte carlo)
-function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true, initial_state::Operation_mode = detumble, 
-                num_orbits = 3, albedo_ds = 2, use_albedo = true, kwargs...) 
+function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true, initial_mode::Operation_mode = detumble, num_orbits = 3, albedo_ds = 2, use_albedo = true, term_mode = finished, kwargs...) 
 
 
     ##### INITIALIZE ##### 
 
     ### Set up desired starting state
-    if initial_state == detumble 
+    if initial_mode == detumble 
         """ Default initial state. Sat est initializes to all ideals"""
         x₀, T_orbit = get_initial_state(; detumbled = false)
         flags = FLAGS(; init_detumble = false, mag_cal = false, dio_cal = false, final_detumble = false, in_sun = false)
@@ -51,7 +50,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
         sat_est   = SATELLITE(; J = sat_truth.J, sta = SAT_STATE(; ideal = true), mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true))
         op_mode   = detumble
 
-    elseif initial_state == mag_cal 
+    elseif initial_mode == mag_cal 
         """ Starts with a low angular velocity """
         x₀, T_orbit = get_initial_state(; detumbled = true)
         flags = FLAGS(; init_detumble = true)
@@ -59,7 +58,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
         sat_est   = SATELLITE(; J = sat_truth.J, sta = SAT_STATE(; ideal = true), mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true))
         op_mode   = detumble  # Will switch over after first iteration
 
-    elseif initial_state == diode_cal
+    elseif initial_mode == diode_cal
         """ Starts with a low angular velocity and correct magnetometer parameters """
         x₀, T_orbit = get_initial_state(; detumbled = true)
         flags = FLAGS(; init_detumble = true, mag_cal = true)
@@ -67,7 +66,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
         sat_est   = SATELLITE(; J = sat_truth.J, mag = sat_truth.magnetometer, dio = DIODES(; ideal = true), sta = SAT_STATE(; ideal = true))
         op_mode = chill;      # Will switch over after first iteration
 
-    elseif initial_state == mekf 
+    elseif initial_mode == mekf 
         """ Starts with a low angular velocity and correct magnetometer/diode parameters """
         x₀, T_orbit = get_initial_state(; detumbled = true)
         flags = FLAGS(; init_detumble = true, mag_cal = true, dio_cal = true, final_detumble = true)
@@ -134,7 +133,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
         sat_ests[i]  = sat_est
         modes[i]     = op_mode 
 
-        if op_mode == finished  # Trim the data and break 
+        if op_mode == term_mode  # Trim the data and break 
             truths    = truths[1:i - 1]
             sensors   = sensors[1:i - 1]
             ecls      = ecls[1:i - 1] 
@@ -243,21 +242,14 @@ end;
 
 
 
-# nd = [norm(sensors[i].diodes) for i = 1:size(sensors, 1)]
-# ndc = [norm(sensors[i].diodes ./ sat_ests[i].diodes.calib_values) for i = 1:size(sensors, 1)]
-
-# for i = 1:6 
-#     d = [sensors[j].diodes[i] for j = 1000:3000]
-#     plot!(d)
-# end
 
 # with_logger(logger) do 
-#     global temp = main(; num_orbits = 0.5, initial_state = diode_cal)
+#     global temp = main(; num_orbits = 0.5, initial_mode = diode_cal)
 # end
-
 
 
 # @info "No Noise!"; results = main(; σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
+# @info "Full Noise!"; results = main(); 
 # sat_truth, sat_est, truths, sensors, ecls, noises, states, sat_ests, op_modes 
 
 # display(plot(results[:states]))
