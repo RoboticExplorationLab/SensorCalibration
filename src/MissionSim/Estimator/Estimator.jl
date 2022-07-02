@@ -1,10 +1,5 @@
-# [src/MissionSim/Estimator/Estimator.jl]
+# [src/Estimator/Estimator.jl]
 
-""" To Do:
-
-    - mag calib: Code, Comment, Clean, Test
-    - mekf: Code, Comment, Clean, Test
-"""
 
 module Estimator 
 
@@ -29,7 +24,6 @@ include("../mag_field.jl")
 
 include("magnetometer_calibration.jl")
 include("mekf.jl"); @info "Using FD in prediction!"
-# include("paper_mekf.jl"); @info "Using paper mekf!"
 
 export estimate, reset_cov!
 export MEKF_DATA, MAG_CALIBRATOR

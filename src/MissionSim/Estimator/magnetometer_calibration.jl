@@ -1,22 +1,13 @@
-# [src/MissionSim/Estimator/magnetometer_calibration.jl]
+# [src/Estimator/magnetometer_calibration.jl]
 
 """ To Do:
       Add:
        - Way to deal with failures
 
-    - Adjust main so this is only called when data is full
-    - Remove the check that ensures the angles are right
-    - Gauss-Newton is pretty slow but is run only once, so...
-    (None of this section needs to be fast, except maybe update!)
-
-    Try using just [1,1,1 0,0,0 0,0,0] as initial guess?
-
     - Because we are just using mag, we are really just passing in Bᴵ_exp as Bᴮ_exp -> verify and update comments 
 """
 
 
-
-# Add alternate constructor with no initial vals? 
 """
     MAG_CALIBRATOR(N, bm, bp)
 
@@ -262,7 +253,7 @@ function gauss_newton(x0, data::MAG_CALIBRATOR{T}; max_iters = 50, ls_iters = 20
     return x
 end
 
-# Kinda slow but not used often
+
 """
     residual(x, data)
 
@@ -280,13 +271,13 @@ end
     attitude. 
 
     Arguments:
-      -x:     Parameters used to form the calibration matrix to correct the        |  [9,]
+      -`x`:     Parameters used to form the calibration matrix to correct the        |  [9,]
                   measured magnetic field vector (in body frame)
-      -data:  Struct containing the measured and predicted magnetic field          |  MAG_CALIBRATOR
+      -`data`:  Struct containing the measured and predicted magnetic field          |  MAG_CALIBRATOR
                   vectors.
 
     Returns:
-      -r:   Vector of residuals for each sample                                    |  [N,]
+      -`r`:   Vector of residuals for each sample                                    |  [N,]
 """
 function residual(x, data::MAG_CALIBRATOR{T}) where {T} 
 
@@ -329,12 +320,12 @@ end
     orthogonality angles are less than π/2.
 
     Arguments:
-      - p:  Calibration values determined by least squares to correct the       |  [9,]
+      - `p``:  Calibration values determined by least squares to correct the       |  [9,]
                 measured magnetic field vectors 
     
     Returns:
-      - T:  Lower-triangular calibration matrix corresponding to p              |  [3, 3]
-      - β:  Vector of magnetometer bias values corresponding to p               |  [3,]
+      - `T`:  Lower-triangular calibration matrix corresponding to p              |  [3, 3]
+      - `β`:  Vector of magnetometer bias values corresponding to p               |  [3,]
 """
 function vec_to_matrix_bias(p::Vector{ET}) where {ET}
 
@@ -386,22 +377,22 @@ end
                  csin(λ)     ccos(λ)sin(ϕ)    ccos(λ)cos(ϕ)]
 
     Arguments:
-      - T:  Lower-triangular calibration matrix corresponding to p              |  [3, 3]
-      - β:  Vector of magnetometer bias values corresponding to p               |  [3,]
+      - `T`:  Lower-triangular calibration matrix corresponding to p              |  [3, 3]
+      - `β`:  Vector of magnetometer bias values corresponding to p               |  [3,]
       
     Returns:
-      - a:  Magnetometer scale factor for the X axis                            |  Scalar
-      - b:  Magnetometer scale factor for the Y axis                            |  Scalar
-      - c:  Magnetometer scale factor for the Z axis                            |  Scalar
-      - ρ:  Non-orthogonality angle between X and Y axes                        |  Scalar
+      - `a`:  Magnetometer scale factor for the X axis                            |  Scalar
+      - `b`:  Magnetometer scale factor for the Y axis                            |  Scalar
+      - `c`:  Magnetometer scale factor for the Z axis                            |  Scalar
+      - `ρ`:  Non-orthogonality angle between X and Y axes                        |  Scalar
                 (i.e., the angular distance from the 'true' Y to measured Y)
-      - λ:  Non-orthogonality angle between X and Z axes                        |  Scalar
+      - `λ`:  Non-orthogonality angle between X and Z axes                        |  Scalar
                 (i.e., the angular distance from the 'true' Z to measured Z)
-      - ϕ:  Non-orthogonality angle between Y and Z axes                        |  Scalar
+      - `ϕ`:  Non-orthogonality angle between Y and Z axes                        |  Scalar
                 (i.e., the angular distance from the 'true' Z to measured Z)
-      - βx: Magnetometer bias along the X axis                                  |  Scalar
-      - βy: Magnetometer bias along the Y axis                                  |  Scalar
-      - βz: Magnetometer bias along the Z axis                                  |  Scalar
+      - `βx`: Magnetometer bias along the X axis                                  |  Scalar
+      - `βy`: Magnetometer bias along the Y axis                                  |  Scalar
+      -` βz`: Magnetometer bias along the Z axis                                  |  Scalar
 
 """
 function extract_elements(T, β)
