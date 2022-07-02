@@ -481,7 +481,7 @@
         sat = Simulator.SATELLITE(; mag = perfect_mag)
         x   = Simulator.STATE(r = SVector{3, Float64}(6.8e6 * [-1.0, 1.0, 0.0]), β = SVector{3, Float64}(zeros(3)) )
         truth, sensor, ecl, noise = Simulator.generate_measurements(sat, alb, x, t, dt;
-                                        σB = 0.0, σ_gyro_scale = 0.0, σr = 0.0, σ_current_scale = 0.0);
+                                        σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0);
         @test all(noise.diodes .== 0);
         @test all(noise.gyro .== 0);
         @test all(noise.pos .== 0);

@@ -106,7 +106,7 @@
         for i = 1:N 
             x = rk4(sat.J, x, u, t + (i - 1) * dt, dt; coef_drag = 0.0, coef_srp = 0.0, n_grav = 0, m_grav = 0, third_body = false)
             tr, s, e, n = generate_measurements(sat, alb, x, t + (i - 1) * dt, dt;
-                                                σB = 0.0, σ_gyro_scale = 0.0, σr = 0.0, σ_current_scale = 0.0);
+                                                σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0);
             truths[i]  = tr 
             sensors[i] = s 
             ecls[i]    = e 

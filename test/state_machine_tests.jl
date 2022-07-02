@@ -135,7 +135,7 @@ end
 
         q̂, ᴵQ̂ᴮ = triad(r₁ᴵ, r₂ᴵ, r₁ᴮ, r₂ᴮ)
 
-        es[i] = norm(cayley_map(q, q̂)) < 0.1
+        es[i] = norm(cayley_map(q, q̂)) < 0.2
     end
     @test all(es .== 1)
 
