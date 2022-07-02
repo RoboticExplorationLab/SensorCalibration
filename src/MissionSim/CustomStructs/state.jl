@@ -1,4 +1,4 @@
-# [src/MissionSim/CustomStructs/state.jl]
+# [src/CustomStructs/state.jl]
 
 """
     STATE{S, T} -> r, v, q, ω, β, x 
@@ -63,11 +63,24 @@ function x(s::STATE{T}) where {T}
     return SVector{16, T}(vec)
 end
 
-#NOT efficient, but whatever
-function RecipesBase.plot(s::Vector{STATE{T}}, state = :a; start = 1, stop = nothing, ds = 1, kwargs...) where {T}
+""" plot(s, sensor; start, stop, kwargs)
+
+      Plotting recipe for a vector of SENSOR structs. Can plot all four sensor measurements over time (which 
+    is the default), or just one specific sensor, which is selected by the second argument. Keyword arguments 
+    allow for using only a portion of the history rather than all.
+
+    Available symbols:
+      `:a`: Show all sensor measurements
+      `:r`: Show position
+      `:v`: Show velocity
+      `:q`: Show attitude (scalar-first quaternion)
+      `:ω`: Show angular velocity 
+      `:β`: Show gyroscope bias
+"""
+function RecipesBase.plot(s::Vector{STATE{T}}, t::Symbol = :a; start = 1, stop = nothing, ds = 1, kwargs...) where {T}
     N = isnothing(stop) ? size(s, 1) : stop 
 
-    if state == :a
+    if t == :a
         # Split apart and format as matrices for plotting
         rs = [vcat([s[i].r;]...) for i = start:ds:N]; rs = hcat(rs...)';
         vs = [vcat([s[i].v;]...) for i = start:ds:N]; vs = hcat(vs...)';
@@ -85,7 +98,7 @@ function RecipesBase.plot(s::Vector{STATE{T}}, state = :a; start = 1, stop = not
         p   = plot()
 
         return plot(pr, pv, pq, pω, pβ, p, plot_title = "State", layout = (3, 2))
-    elseif state == :r
+    elseif t == :r
         pos = [vcat([s[i].r;]...) for i = start:ds:N]; pos = hcat(pos...)';
         rs = []
         labels = ["x" "y" "z"]
@@ -95,7 +108,7 @@ function RecipesBase.plot(s::Vector{STATE{T}}, state = :a; start = 1, stop = not
         end
         return plot(rs..., layout = 3, plot_title = "Position (Cart)", xlabel = "Index", ylabel = "Position (m)"; kwargs...)
 
-    elseif state == :v  
+    elseif t == :v  
         vels = [vcat([s[i].v;]...) for i = start:ds:N]; vels = hcat(vels...)';
         vs = []
         labels = ["x" "y" "z"]
@@ -105,7 +118,7 @@ function RecipesBase.plot(s::Vector{STATE{T}}, state = :a; start = 1, stop = not
         end
         return plot(vs..., plot_title = "Velocity", xlabel = "Index", ylabel = "Velocity (m/s)"; kwargs...)
 
-    elseif state == :q 
+    elseif t == :q 
         quats = [vcat([s[i].q;]...) for i = start:ds:N]; quats = hcat(quats...)';
         qs = []
         for i = 1:4
@@ -115,7 +128,7 @@ function RecipesBase.plot(s::Vector{STATE{T}}, state = :a; start = 1, stop = not
         return plot(qs..., plot_title = "Attitude (quat)", xlabel = "Index", ylabel = "Magnitutde"; kwargs...)
 
 
-    elseif state == :ω 
+    elseif t == :ω 
         angs = [vcat([s[i].ω;]...) for i = start:ds:N]; angs = hcat(angs...)';
         ωs = []
         labels = ["x" "y" "z"]
@@ -128,7 +141,7 @@ function RecipesBase.plot(s::Vector{STATE{T}}, state = :a; start = 1, stop = not
         return plot(ωs..., plot_title = "Ang Vel", xlabel = "Index", ylabel = "Vel (deg/s)"; kwargs...)
 
 
-    elseif state == :β
+    elseif t == :β
         bias = [vcat([s[i].β;]...) for i = start:ds:N]; bias = hcat(bias...)';
         βs = []
         labels = ["x" "y" "z"]
@@ -140,7 +153,7 @@ function RecipesBase.plot(s::Vector{STATE{T}}, state = :a; start = 1, stop = not
 
 
     else 
-        println("Warning: State $state is not ready for plotting!")
+        println("Warning: State $t is not ready for plotting!")
         println("\tViable symbols: r, v, q, ω, β, a")
     end
 

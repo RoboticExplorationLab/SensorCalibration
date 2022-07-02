@@ -1,4 +1,4 @@
-# [src/MissionSim/CustomStructs/ground_truth.jl]
+# [src/CustomStructs/ground_truth.jl]
 
 """
     GROUND_TRUTH{N, T} -> t, Bᴵ, sᴵ, ŝᴮ, Bᴮ, i
@@ -17,7 +17,23 @@ struct GROUND_TRUTH{N, T}
     Bᴮ::SVector{3, T}               # Magnetic field vector in body frame
     I::SVector{N, T}                # Diode currents 
 end
-function RecipesBase.plot(gt::Vector{GROUND_TRUTH{6, T}}, t::Symbol = :a; start = 1, stop = nothing, ds = 1, split = false, kwargs...) where {T}
+
+""" plot(gt, s; start, stop, ds, kwargs)
+
+      Plotting recipe for a vector of GROUND_TRUTH structs. Can plot the five data sets over time (which 
+    is the default), or just one specific portion, which is selected by the second argument. Keyword arguments 
+    allow for using only a portion of the history rather than all. Also includes a downsample rate `ds` 
+    for long runs. 
+
+    Available symbols:
+      `:a`: Show all sensor measurements
+      `:Bᴵ`: Show mag field in inertial frame
+      `:sᴵ`: Show sun vector in inertial frame  
+      `:sᴮ`: Show sun vector in body frame (unit)
+      `:Bᴮ`: Show mag field in body frame
+      `:I`:  Show generated current
+"""
+function RecipesBase.plot(gt::Vector{GROUND_TRUTH{6, T}}, t::Symbol = :a; start = 1, stop = nothing, ds = 2, split = false, kwargs...) where {T}
     N = isnothing(stop) ? size(gt, 1) : stop 
 
 

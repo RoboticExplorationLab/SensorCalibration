@@ -1,4 +1,4 @@
-# [src/MissionSim/CustomStructs/sensors.jl]
+# [src/CustomStructs/sensors.jl]
 
 """
     SENSORS{N, T} -> magnetometer, diodes, gyro, pos
@@ -14,16 +14,28 @@ struct SENSORS{N, T}
     pos::SVector{3, T}               # Measured position 
 end
 
-""" Add info! """
+""" plot(s, sensor; start, stop, kwargs)
+
+      Plotting recipe for a vector of SENSOR structs. Can plot all four sensor measurements over time (which 
+    is the default), or just one specific sensor, which is selected by the second argument. Keyword arguments 
+    allow for using only a portion of the history rather than all.
+
+    Available symbols:
+      `:a`: Show all sensor measurements
+      `:m`: Show magnetometer measurements
+      `:d`: Show diode measurements 
+      `:g`: Show gyroscope measurements
+      `:p`: Show position measurements
+"""
 function RecipesBase.plot(s::Vector{SENSORS{6, T}}, sensor::Symbol = :a; start = 1, stop = nothing, kwargs...) where {T}
     N = isnothing(stop) ? size(s, 1) : stop
 
     # Split apart and format as matrices for plotting
     if sensor == :a
-        mags = [s[i].magnetometer for i = start:N]; mags = reduce(hcat, mags)'; # mags = hcat(mags...)';
-        dios = [s[i].diodes       for i = start:N]; dios = reduce(hcat, dios)'; # dios = hcat(dios...)';
-        gyrs = [s[i].gyro         for i = start:N]; gyrs = reduce(hcat, gyrs)'; # gyrs = hcat(gyrs...)';
-        poss = [s[i].pos          for i = start:N]; poss = reduce(hcat, poss)'; # poss = hcat(poss...)';
+        mags = [s[i].magnetometer for i = start:N]; mags = reduce(hcat, mags)'; 
+        dios = [s[i].diodes       for i = start:N]; dios = reduce(hcat, dios)'; 
+        gyrs = [s[i].gyro         for i = start:N]; gyrs = reduce(hcat, gyrs)'; 
+        poss = [s[i].pos          for i = start:N]; poss = reduce(hcat, poss)'; 
 
         # Make the plots
         pM = plot(mags, title = "Magnetometers", xlabel = "Index", ylabel = "Mag Field (μT)",   label = ["x" "y" "z"]; kwargs...)
@@ -51,10 +63,10 @@ function RecipesBase.plot(s::Vector{SENSORS{6, T}}, sensor::Symbol = :a; start =
             d = plot(dios[:, i], label = labels[i])
             push!(ds, d)
         end
-        return plot(ds..., plot_title = "Diode Measurements") # layout = nd) #(3, 2))
+        return plot(ds..., plot_title = "Diode Measurements") 
         
     elseif sensor == :g 
-        gyrs = [s[i].gyro         for i = start:N]; gyrs = reduce(hcat, gyrs)';
+        gyrs = [s[i].gyro for i = start:N]; gyrs = reduce(hcat, gyrs)';
         gs = []
         labels = ["x", "y", "z"]
         for i = 1:3 

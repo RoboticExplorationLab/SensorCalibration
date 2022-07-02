@@ -1,20 +1,4 @@
 module CustomStructs
- 
-
-""" TO Do
- - Decide on default photodiode configuration (in diodes and sat state)
- - Add in plots, magnetometer noise to the 'NOISE' struct...?
- - Alphabetize? Organize somehow (in separate files?)
- - flags
-
- - SATELLITE has diodes in SAT_STATE && in DIODES and that can be way problematic (make 'diodes' a function call that pulls from state?)
- - SAT_STATE and DIODES both have the C, α, ϵ -> remove from sat_state
-
-
- try reduce(hcat, v) instead of (hcat([v;]...)) in plotting!
-
-    Make a 'Structs/types' folder and have each one in its own, so we can add more functions cleanly
-"""
 
 using EarthAlbedo
 using SatelliteDynamics
@@ -25,7 +9,6 @@ using Plots
 using Infiltrator
 
 export ALBEDO, ESTIMATES, TRIVIAL
-
 
 include("CustomStructs/diodes.jl"); export DIODES 
 include("CustomStructs/flags.jl");  export FLAGS

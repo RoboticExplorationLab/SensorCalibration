@@ -1,4 +1,4 @@
-# [src/MissionSim/CustomStructs/magnetometer.jl]
+# [src/CustomStructs/magnetometer.jl]
 
 """
     MAGNETOMETER{T} -> scale_factors, non_ortho_angles, bias
@@ -21,7 +21,7 @@ struct MAGNETOMETER{T}
 
     function MAGNETOMETER(s, noa, b) 
         """ Converts to static """
-        T = typeof(s[1])
+        T = typeof(s[1]) 
         MAGNETOMETER(SVector{3, T}(s), SVector{3, T}(noa), SVector{3, T}(b))
     end
 
@@ -41,6 +41,3 @@ struct MAGNETOMETER{T}
         end
     end
 end
-# Base.deepcopy(s::MAGNETOMETER) = MAGNETOMETER(deepcopy(s.scale_factors), deepcopy(s.non_ortho_angles), deepcopy(s.bias))
-
-

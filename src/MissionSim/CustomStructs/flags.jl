@@ -1,5 +1,10 @@
 # [src/MissionSim/CustomStructs/flags.jl]
 
+""" FLAGS 
+
+      Struct of flags that are used by the state machine to determine which state 
+    to transition to.
+"""
 mutable struct FLAGS
     init_detumble::Bool 
     magnetometer_calibrated::Bool

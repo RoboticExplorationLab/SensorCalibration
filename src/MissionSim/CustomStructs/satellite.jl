@@ -1,11 +1,11 @@
-# [src/MissionSim/CustomStructs/satellite.jl]
+# [src/CustomStructs/satellite.jl]
 
 """
     SATELLITE{S, T} -> J, magnetometer, diodes, state, covariance
 
       Satellite struct that contains the inertia matrix for the CubeSat, as well
     as magnetometers and diodes. Also tracks the SATELLITE state and covariance 
-    (not the environment state state)
+    (not the environment state state).
 """
 struct SATELLITE{S, T}
     J::SMatrix{3, 3, T, 9}               # Inertia Matrix of satellite  
@@ -17,19 +17,20 @@ struct SATELLITE{S, T}
     function SATELLITE(J::SMatrix{3, 3, T, 9}, mag::MAGNETOMETER{T}, dio::DIODES{S, T}, 
                         sta::SAT_STATE{T}, cov::Matrix{T})  where {S, T}
         """ Primary Constructor  """
+
         new{S, T}(SMatrix{3, 3, T, 9}(J), mag, dio, sta, cov)
     end
 
     function SATELLITE(; J = nothing, mag::MAGNETOMETER{T} = MAGNETOMETER(), dio::DIODES = DIODES(), 
                             sta::SAT_STATE = SAT_STATE(), cov::Matrix{T} = SAT_COVARIANCE().Σ, ideal::Bool = false) where {T}
-        """ Random SATELLITE """
+        """ Generate a SATELLITE with random parameters """
 
         if ideal 
             _J = isnothing(J) ? SMatrix{3, 3, Float64, 9}(0.2 * I(3)) : J
             _mag = MAGNETOMETER(; ideal = true)
             _dio = DIODES(; ideal = true)
             _sta = SAT_STATE(; ideal = true)
-            _cov = cholesky(Hermitian(Matrix(cov))).U #Matrix(1.0 * I(24))  # 6 + 3 * (N = 6)
+            _cov = cholesky(Hermitian(Matrix(cov))).U
 
             return SATELLITE(_J, _mag, _dio, _sta, Matrix(_cov))
         end

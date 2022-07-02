@@ -1,4 +1,4 @@
-# [src/MissionSim/CustomStructs/diodes.jl]
+# [src/CustomStructs/diodes.jl]
 
 """
     DIODES{S, T} -> calib_values, azi_angles, elev_angles
@@ -6,6 +6,9 @@
       Calibration values (~ scale factor) and surface normal (in azimuth and elevation angle) 
     for a set of sun-sensing photodiodes on the CubeSat. Allows for any number of diodes, but 
     the default is six, with one located on each side of the CubeSat. 
+
+    NOTE that azimuth angle is not defined when the vector is straight up or straight down. To 
+    avoid this problem, we "rotate" the default referance frame so nothing is pointing up/down. 
 """
 struct DIODES{S, T}
     calib_values::SVector{S, T}       #   Calibration value (How much 1 unit of current is scaled by)
@@ -32,7 +35,6 @@ struct DIODES{S, T}
 
     function DIODES(cv, aa, ea)
         """ Constructor for non-static types """
-        @warn "Improper declaration of DIODES; converting to static..."
 
         S = length(cv)
         T = typeof(cv[1])
@@ -52,14 +54,12 @@ struct DIODES{S, T}
             ea = [(-pi/4); (pi/4);  0.0;    0.0;    (pi/4); (-pi/4)] 
             aa = [0.0;      pi;     (pi/2); (-pi/2); 0.0;    pi]  
 
-            # 
             # aa = [0.0,  pi, pi/2, -pi/2,  0.0,   0.0]
             # ea = [0.0, 0.0,  0.0,   0.0, pi/2, -pi/2]
 
             return DIODES(SVector{N, Float64}(cv), SVector{N, Float64}(aa), SVector{N, Float64}(ea))
         end
 
-        # cv = rand(Normal(2.0, 0.3), N)   # On-Orbit... paper has 0.5 or 0.2 
         cv = rand(Normal(1.0, 0.2), N)
 
         if N == 6

@@ -3,7 +3,7 @@
 # MAY BE UNNECESSARY
 
 """ Originally made so I could define functions on it, but I am not sure it is worht it..."""
-# Unnecessary?
+
 struct SAT_COVARIANCE{T}
     """ Kept together b/c may have cross terms """
     """ Probably lower triangular, but not necessarily forced to be so """
