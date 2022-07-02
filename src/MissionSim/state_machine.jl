@@ -1,13 +1,47 @@
-# [src/MissionSim/state_machine.jl]
+# [src/state_machine.jl]
 
 """ TO DO
  - Split by typeof(data)? 
- - Figure out values for flags.in_sun
  - Values for opt args
 """
 
 # Given a state, generate measurements. Estimate/Control. Generate and return next step (maybe flip that to be first?)
-# Move to state machine. Consider splitting by typeof(data). Add in optional arguments.
+#Consider splitting by typeof(data). Add in optional arguments.
+""" step(sat_truth, sat_est, alb, x, t, dt, op_mode, flags, idx, progress_bar, T_orbit, data; use_albedo, initial_detumble_thresh, final_detumble_thresh, mag_ds_rate, 
+            calib_cov_thres, mekf_cov_thres, σβ, σB, σ_gyro, σr, σ_current)
+
+      Steps the system forward. Takes in a given next state, and generates measurements. The Estimator is used to update the 
+    state estimate, and the controller generates a desired command when applicable. Integrates over a time step to get the next 
+    time step, which is returned. 
+
+      Time is updated, as well as flags. Whether or not there is an eclipse is predicted from the diode readings. 
+
+    Arguments: (LOTS)
+      - `sat_truth`: Satellite containing the true parameters for the satellite   |  SATELLITE
+      - `sat_est`: Satellite containing best estimate of sat_truths' parameters   |  SATELLITE  
+      - `alb`:  ALBEDO struct containing REFL and cell center info                |  ALBEDO
+      - `x`:  Current state of the environment that is used to generate measurements  |  STATE
+      - `t`:  Current time, as an Epoch                                           |  Epoch
+      - `dt`: Time step                                                           |  Scalar 
+      - `op_mode`: Current operation mode                                         |  Operation_mode 
+      - `flags`: Struct used to track what mode to transition to                  |  FLAGS 
+      - `idx`: How many time steps have elapsed since start                       |  Int 
+      - `progress_bar`: Progress bar to display progress                          |  ProgressBar 
+      - `T_orbit`: Time to complete a full orbit                                  |  Scalar 
+      - `data`: Struct that contains whatever data is necessary for the Estimator |  (ANY)
+
+      - `initial_detumble_thresh`: (Opt) Minimum angular velocity to terminate initial detumbling. Default is 15 deg/s
+      - `final_detumble_thresh`:   (Opt) Minimum angular velocity to terminate final detumbling. Default is 8 deg/s
+      - `mag_ds_rate`:  (Opt) Downsampling rate for the magnetometer calibration. Default is 60 
+      - `calib_cov_thresh`:  (Opt) Threshold for the norm of the calibration terms in the covariance matrix to terminate diode_cal 
+      - `mekf_cov_thresh`:  (Opt) Threshold for the norm of the non-calibration terms in the covariance matrix to terminate mekf
+      (Others are noise parameters, see respective functions)
+      
+    Returns: 
+
+
+
+"""
 function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}, t::Epoch, dt::Real, op_mode::Operation_mode, 
                 flags::FLAGS, idx::Int, progress_bar, T_orbit, data; use_albedo = true, initial_detumble_thresh = deg2rad(15), final_detumble_thresh = deg2rad(8),  # was 25, 10 deg
                 mag_ds_rate = 60, calib_cov_thres = 0.036, mekf_cov_thres = 0.004, σβ = 3.14e-5, σB = deg2rad(0.25), σ_gyro = 0.5e-4, 
@@ -17,49 +51,37 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
     ### Generate measurements
 
-    # No noise!
     truth, sensors, ecl, noise = generate_measurements(sat_truth, alb, x, t, dt; use_albedo = use_albedo, σB = σB, σ_gyro = σ_gyro, σr = σr, σ_current = σ_current);
 
-    # Update measurements as time goes on 
-    flags.magnetometer_calibrated && (sensors = correct_magnetometer(sat_est, sensors))
 
-    # MEKF cant have it calibrated but DETUMBLE wants it calibrated
-    # if flags.diodes_calibrated   # THIS IS ACTUALLY BAD  
-    #     correct_gyroscope(sat_est, sensors)
-    # end
+    flags.magnetometer_calibrated && (sensors = correct_magnetometer(sat_est, sensors))  # Correct the magnetometer readings once it has been calibrated 
 
-    ##### MAYBE ACCUMULATE AVERAGES DURING MAG CAL AND USE DEVIATION FROM MEAN?????
-    ##### -OR- hope my cal is good enough i can always do diodes ./ calib_values...?
-    # flags.in_sun = (flags.in_sun  &&  flags.diodes_calibrated) ? norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.8 :
-    #                (flags.in_sun  && !flags.diodes_calibrated) ? norm(sensors.diodes) > 0.7 :
-    #                (!flags.in_sun &&  flags.diodes_calibrated) ? norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.9 :
-    #                                                              norm(sensors.diodes) > 0.8
-                                      
+    ##### MAYBE ACCUMULATE AVERAGES DURING MAG CAL AND USE DEVIATION FROM MEAN?????            
     flags.in_sun = (flags.in_sun) ? norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.7 :
                                     norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.8 
     # flags.in_sun = ecl ### REMOVE !    
 
-
-    ### Estimate & Control (make each of these sub functions...?)
+    ### Estimate & Control 
     next_mode = op_mode
     u = SVector{3, T}(zeros(3))
     notes = ""
 
 
-    """ detumble -> mag_cal, mekf
 
-        Starts by generating a control to slow the tumbling of the CubeSat. 
-        There are two times that the sat is detumbling: the first is right after launch, 
-        and it does an initial detumbling to allow for communication. The second occurs 
-        after the photodiodes have been calibrated and a good estimate of the gyroscope 
-        bias has been made, and allows for a more precise detumbling. 
+    if op_mode == detumble      # -> mag_cal, mekf
+        """ detumble -> mag_cal, mekf
 
-        After the initial detumbling, we transition to calibrating the magnetometers. 
-        After the final detumbling, we transition to the vanilla MEKF.
+            Starts by generating a control to slow the tumbling of the CubeSat. 
+            There are two times that the sat is detumbling: the first is right after launch, 
+            and it does an initial detumbling to allow for communication. The second occurs 
+            after the photodiodes have been calibrated and a good estimate of the gyroscope 
+            bias has been made, and allows for a more precise detumbling. 
 
-        No estimation occurs during this mode.
-    """
-    if op_mode == detumble 
+            After the initial detumbling, we transition to calibrating the magnetometers. 
+            After the final detumbling, we transition to the vanilla MEKF.
+
+            No estimation occurs during this mode.
+        """
 
         ctrl = DETUMBLER(sensors.gyro, sensors.magnetometer, dt)
         u    = generate_command(ctrl)
@@ -95,19 +117,21 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
         notes = "Mode: $op_mode\t||̂ω||: $(norm(rad2deg.(sensors.gyro))) \t ||ω||: $(norm(rad2deg.(x.ω)))"
 
-    """ mag_cal -> chill, diode_cal 
 
-        Accumulates data over some 2 orbits and uses that data + Gauss-Newton 
-        to estimate the magnetometer calibration parameters. To prevent unnecessarily
-        large datasets, this downsamples at some prespecified rate, and then runs 
-        the 'estimate' function when enough data has been gathered. 
+    elseif op_mode == mag_cal   # -> chill, diode_cal 
+        """ mag_cal -> chill, diode_cal 
 
-        Transitions to 'diode_cal' if there is no eclipse; otherwise, it transitions 
-        to 'chill' and waits.
-    """
-    elseif op_mode == mag_cal 
+            Accumulates data over some 2 orbits and uses that data + Gauss-Newton 
+            to estimate the magnetometer calibration parameters. To prevent unnecessarily
+            large datasets, this downsamples at some prespecified rate, and then runs 
+            the 'estimate' function when enough data has been gathered. 
+
+            Transitions to 'diode_cal' if there is no eclipse; otherwise, it transitions 
+            to 'chill' and waits.
+        """ 
 
         notes = "Mode: $op_mode \tSamples: $(data.idx[1])/$(data.N)"
+
         # Downsample 
         if idx % (mag_ds_rate / dt) == 0
             Bᴵ_pred = IGRF13(sensors.pos, t)  # Because this is attitude-independent we just use Bᴵ
@@ -133,15 +157,16 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
 
 
-    """ chill -> diode_cal 
 
-        Temporary mode that is used as a waiting zone until something happens. 
-        Right now, this is only called when diodes are being calibrated but 
-        an eclipse is occuring. 
+    elseif op_mode == chill     # -> diode_cal, (mekf?)
+        """ chill -> diode_cal 
 
-        Transitions to 'diode_cal' as soon as the eclipse is over. 
-    """
-    elseif op_mode == chill
+            Temporary mode that is used as a waiting zone until something happens. 
+            Right now, this is only called when diodes are being calibrated but 
+            an eclipse is occuring. 
+
+            Transitions to 'diode_cal' as soon as the eclipse is over. 
+        """
         if flags.in_sun 
             next_mode = diode_cal 
 
@@ -156,17 +181,18 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
         notes = "Mode: $op_mode\tEclipse: $ecl"
 
 
-    """ diode_cal -> chill, detumble (round 2)
 
-        Runs the estimator for calibrating the diodes while estimating attitude and 
-        gyroscope bias. Does not work during eclipses, so this checks and transitions 
-        to 'chill' during eclipses.
+    elseif op_mode == diode_cal # -> chill, detumble (round 2)
+        """ diode_cal -> chill, detumble (round 2)
 
-        When the magnitude of the covariance of the calibration state C, α, and ϵ is 
-        beneath some value, this transitions to 'detumble' for the final, more thorough 
-        detumbling. 
-    """
-    elseif op_mode == diode_cal 
+            Runs the estimator for calibrating the diodes while estimating attitude and 
+            gyroscope bias. Does not work during eclipses, so this checks and transitions 
+            to 'chill' during eclipses.
+
+            When the magnitude of the covariance of the calibration state C, α, and ϵ is 
+            beneath some value, this transitions to 'detumble' for the final, more thorough 
+            detumbling. 
+        """
         if !(flags.in_sun) 
             next_mode = chill 
         else
@@ -182,16 +208,17 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             notes = "mode: $op_mode \t||Σ|| = $(norm(sat_est.covariance[7:end, 7:end])) \t ||ΣC|| = $(norm(sat_est.covariance[7:12, 7:12])) \t ||Σα|| = $(norm(sat_est.covariance[13:18, 13:18])) \t ||Σϵ|| = $(norm(sat_est.covariance[19:24, 19:24]))"
         end
 
-    """ mekf -> finished 
 
-        Tracks the attitude and gyroscope bias of the CubeSat. Run once 
-        all calibration is done, and once the covariance is small enough this 
-        transitions to 'finished'
+    elseif op_mode == mekf      # -> finished
+        """ mekf -> finished 
 
-        Note that this must be preceeded with TRIAD to get the initial guess of q, as 
-        well as reset_cov! and MEKF_DATA(), none of which are currently being done.
-    """
-    elseif op_mode == mekf 
+            Tracks the attitude and gyroscope bias of the CubeSat. Run once 
+            all calibration is done, and once the covariance is small enough this 
+            transitions to 'finished'
+
+            Note that this must be preceeded with TRIAD to get the initial guess of q, as 
+            well as reset_cov! and MEKF_DATA(), none of which are currently being done.
+        """
 
         if false #!(flags.in_sun)
             next_mode = chill 
@@ -223,22 +250,28 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
 
     ### Display
-    n = "Mode: $op_mode, \t Iter:  $idx" * "\n" * notes
-    # ProgressMeter.next!(progress_bar; show_values = [(:Notes, n)])
     ProgressMeter.next!(progress_bar; showvalues = [(:Mode, op_mode), (:Iteration, idx), (:Notes, notes)])
-
-
-    ### REMOVE - DEBUGGING CHECKS! 
-    # ((minimum(sat_est.diodes.calib_values) ≤ 0.0) || (maximum(sat_est.diodes.calib_values) > 5) ) && @infiltrate
-    # ((norm(cayley_map(sat_truth.state.q, x⁺.q)) > 1e-5) || (sat_truth.state.β ≉ x⁺.β) ) && @infiltrate
-
     return sat_truth, sat_est, x⁺, t, next_mode, data, truth, sensors, ecl, noise
 end
 
+""" run_triad(sensors, sat_est, t, in_sun)
 
-function run_triad(sensors::SENSORS{N, T}, sat_est::SATELLITE, t::Epoch, in_sun::Bool) where {N, T}
+      Uses the current time and sensor measurements to estimate the 
+    sun vector and magnetic field vector in body and inertial frames, and uses 
+    TRIAD to initialize attitude estimate.
+
+    Arguments:
+      - `sensors`:  Sensor measurements at current time step    |  SENSORS
+      - `sat_est`:  Current estimate of Satellite parameters    |  SATELLITE 
+      - `t`:        Current time, as an Epoch                   |  Epoch 
+      - `in_sun`:   (Opt) whether the satellite is eclipsed. Just for debugging. Default is true 
+
+    Returns:
+      - `q`:  Estimate of satellite attitude
+
+"""
+function run_triad(sensors::SENSORS{N, T}, sat_est::SATELLITE, t::Epoch, in_sun::Bool = true) where {N, T}
     (!in_sun) && @warn "run_triad should never be called if not in the sun!"
-    (!in_sun) && @infiltrate
 
     sᴵ_est = sun_position(t) - sensors.pos     # Estimated sun vector 
     Bᴵ_est = IGRF13(sensors.pos, t)            # Estimated magnetic field vector
@@ -249,20 +282,21 @@ function run_triad(sensors::SENSORS{N, T}, sat_est::SATELLITE, t::Epoch, in_sun:
     return SVector{4, T}(q) 
 end
 
+""" triad(r₁ᴵ, r₂ᴵ, r₁ᴮ, r₂ᴮ)
+
+    Method for estimating the rotation matrix between two reference frames given one pair of vectors in each frame
+
+    Arguments:
+        - `r₁ᴵ`, `r₂ᴵ`: Pair of vectors in the Newtonian (inertial) frame     | [3,] each
+        - `r₁ᴮ`, `r₂ᴮ`: Corresponding pair of vectors in body frame           | [3,]   each
+
+    Returns:
+        - `R`: A directed cosine matrix (DCM) representing the rotation     | [3 x 3]
+                between the two frames 
+        - `q`: A quaternion (scalar last) representing the rotation         | [4,]
+                between the two frames
+"""
 function triad(r₁ᴵ,r₂ᴵ,r₁ᴮ,r₂ᴮ)
-    """
-        Method for estimating the rotation matrix between two reference frames given one pair of vectors in each frame
-
-        Arguments:
-            - r₁ᴵ, r₂ᴵ: Pair of vectors in the Newtonian (inertial) frame     | [3,] each
-            - r₁ᴮ, r₂ᴮ: Corresponding pair of vectors in body frame           | [3,]   each
-
-        Returns:
-            - R: A directed cosine matrix (DCM) representing the rotation     | [3 x 3]
-                    between the two frames 
-            - q: A quaternion (scalar last) representing the rotation         | [4,]
-                    between the two frames
-    """
 
     𝐫₁ᴵ = r₁ᴵ / norm(r₁ᴵ)
     𝐫₂ᴵ = r₂ᴵ / norm(r₂ᴵ)
@@ -289,12 +323,7 @@ function triad(r₁ᴵ,r₂ᴵ,r₁ᴮ,r₂ᴮ)
 end
 
 
-
-# Still need to the wierd stuff?
-# order of accuracy ~few degrees 
-# Dont need all sat_est, just diodes
 # The Pseudo-inv method would probably be sketchy IRL because when the sun isn't illuminating 3+ diodes it would fail
-
 # This method does not rely on knowledge of photodiode setup in advance
 # Also, even with perfect estimates for the diode parameters this still gets ~2* error
 function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
@@ -312,25 +341,6 @@ function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N
     ŝ = (ns' * ns) \ (ns' * Ĩ)
     return ŝ / norm(ŝ)
 end
-
-
-# function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
-
-#     sph2cart(α, ϵ, ρ) = [ρ * sin(pi/2 - ϵ)*cos(α); ρ * sin(pi/2 - ϵ) * sin(α); ρ * cos(pi/2 - ϵ)]
-    
-#     sx, sy, sz = 0.0, 0.0, 0.0
-
-#     for i = 1:6 
-#         d = sens.diodes[i] / diodes.calib_values[i]
-#         x, y, z = sph2cart(diodes.azi_angles[i], diodes.elev_angles[i], d)
-#         sx += x 
-#         sy += y
-#         sz += z
-#     end
-
-#     ŝᴮ = [sx, sy, sz]
-#     return SVector{3, T}(ŝᴮ / norm(ŝᴮ))
-# end
 
 function estimate_sun_vector2(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
 
@@ -418,6 +428,19 @@ function estimate_sun_vector_old(sens::SENSORS{N, T}, sat_est::SATELLITE) where 
     return SVector{3, T}(sun_vec_est) # Unit - ŝᴮ
 end
 
+
+""" correct_magnetometer(sat, sensors)
+
+      Uses the current estimate of the satellite magnetometer parameters to 
+    correct the magnetometer reading.
+
+    Arguments:
+      - `sat`: Satellite with magnetometer parameters to use in calibrating (probably the sat_est)    |  SATELLITE 
+      - `sensors`:  Set of sensor measurements at the current time step                               |  SENSORS 
+
+    Returns:
+      - `sensors`:  Set of sensor measurements with a corrected magnetometer reading                  |  SENSORS
+"""
 function correct_magnetometer(sat::SATELLITE, sensors::SENSORS{N, T}) where {N, T}
 
     a, b, c = sat.magnetometer.scale_factors 
@@ -434,6 +457,7 @@ function correct_magnetometer(sat::SATELLITE, sensors::SENSORS{N, T}) where {N, 
     return SENSORS(B̂ᴮ, sensors.diodes, sensors.gyro, sensors.pos)
 end
 
+""" Alternative form that uses the measured magnetic field vector in body frame rather than the sensors. """
 function correct_magnetometer(sat::SATELLITE, B::SVector{3, T}) where {T}
 
     a, b, c = sat.magnetometer.scale_factors 

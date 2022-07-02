@@ -1,16 +1,14 @@
-# [test/quaternions.jl] 
+# [src/quaternions.jl] 
 
 """ Common functions used when working with quaternions (assumes scalar first!) """
-# This really needs to be tidied up and tested
-
 
 using LinearAlgebra   # For identity matrix 
 
-# TO DO:
-#  - Add in functionality for static arrays ?
-#  - Test for type stability and allocations? 
-#  - Add in derivative, conj, etc...
+                                        #################
+                                        # `hat` methods #
+                                        #################
 
+""" Takes in a three-element vector and returns a skew-symmetric cross-product matrix """
 function hat(v::Vector{T})::Matrix{T} where {T}
     M = zeros(T, 3, 3)
     M[1, 2] = -v[3]
@@ -91,98 +89,95 @@ function rHat(s::T, v::SubArray{T})::Matrix{T} where {T}
     return M 
 end
 
+
+                                        #######################
+                                        # `L` and `R` Methods #
+                                        #######################
+
+""" Takes in a scalar-first unit quaternion and converts it to a left-side matrix for multiplication """
 function L(q::SubArray{T})::Matrix{T} where {T}
     qₛ = q[1]
-    qᵥ = view(q, 2:4)      # ≈ 2ns for the pair
+    qᵥ = view(q, 2:4)      
 
-    M = zeros(T, 4, 4)     # 25 ns, 1 alloc 200 byte
-    M[1, 1] = q[1]         # 1 ns, 0 alloc
+    M = zeros(T, 4, 4)    
+    M[1, 1] = q[1]         
 
-    M[1, 2:4] .= -qᵥ       # 30 ns, 1 alloc, 112 bytes  (b/c negative)
-    M[2:4, 1] .=  qᵥ       # 20 ns, 0 alloc
-    M[2:4, 2:4] .= lHat(qₛ, qᵥ) #  About 150ns faster, 3 fewer alloc, and 400 fewer bytes
+    M[1, 2:4] .= -qᵥ       
+    M[2:4, 1] .=  qᵥ      
+    M[2:4, 2:4] .= lHat(qₛ, qᵥ) 
 
     return M
 end
 
 function L(q::Vector{T})::Matrix{T} where {T} 
     qₛ = q[1]
-    qᵥ = view(q, 2:4)      # ≈ 2ns for the pair
+    qᵥ = view(q, 2:4)      
 
-    M = zeros(T, 4, 4)     # 25 ns, 1 alloc 200 byte
-    M[1, 1] = q[1]         # 1 ns, 0 alloc
+    M = zeros(T, 4, 4)    
+    M[1, 1] = q[1]        
 
-    M[1, 2:4] .= -qᵥ       # 30 ns, 1 alloc, 112 bytes  (b/c negative)
-    M[2:4, 1] .=  qᵥ       # 20 ns, 0 alloc
-    M[2:4, 2:4] .= lHat(qₛ, qᵥ) #  About 150ns faster, 3 fewer alloc, and 400 fewer bytes
-    # M[2:4, 2:4] .= qₛ * I(3) + hat(qᵥ)  # 225, 5 alloc, 750 bytes  (50 ns, 1 alloc, 160 from hat)
+    M[1, 2:4] .= -qᵥ       
+    M[2:4, 1] .=  qᵥ       
+    M[2:4, 2:4] .= lHat(qₛ, qᵥ) 
 
     return M
 end
 
 function L(q::SVector{4, T})::SMatrix{4, 4, T, 16} where {T} 
     qₛ = q[1]
-    qᵥ = view(q, 2:4)      # ≈ 2ns for the pair
+    qᵥ = view(q, 2:4)      
 
-    M = zeros(T, 4, 4)     # 25 ns, 1 alloc 200 byte
-    M[1, 1] = q[1]         # 1 ns, 0 alloc
+    M = zeros(T, 4, 4)    
+    M[1, 1] = q[1]         
 
-    M[1, 2:4] .= -qᵥ       # 30 ns, 1 alloc, 112 bytes  (b/c negative)
-    M[2:4, 1] .=  qᵥ       # 20 ns, 0 alloc
-    M[2:4, 2:4] .= lHat(qₛ, qᵥ) #  About 150ns faster, 3 fewer alloc, and 400 fewer bytes
-    # M[2:4, 2:4] .= qₛ * I(3) + hat(qᵥ)  # 225, 5 alloc, 750 bytes  (50 ns, 1 alloc, 160 from hat)
+    M[1, 2:4] .= -qᵥ      
+    M[2:4, 1] .=  qᵥ       
+    M[2:4, 2:4] .= lHat(qₛ, qᵥ) 
 
     return SMatrix{4, 4, T, 16}(M)
 end
 
+""" Takes in a scalar-first unit quaternion and converts it to a right-side matrix for multiplication """
 function R(q::Vector{T})::Matrix{T} where {T}
     qₛ = q[1]
-    qᵥ = view(q, 2:4)      # ≈ 2ns for the pair
+    qᵥ = view(q, 2:4)      
 
-    M = zeros(T, 4, 4)     # 25 ns, 1 alloc 200 byte
-    M[1, 1] = q[1]         # 1 ns, 0 alloc
+    M = zeros(T, 4, 4)    
+    M[1, 1] = q[1]         
 
-    M[1, 2:4] .= -qᵥ       # 30 ns, 1 alloc, 112 bytes  (b/c negative)
-    M[2:4, 1] .=  qᵥ       # 20 ns, 0 alloc
-    M[2:4, 2:4] .= rHat(qₛ, qᵥ) #  About 150ns slower, 3 fewer alloc, and 400 fewer bytes
-    # M[2:4, 2:4] .= qₛ * I(3) - hat(qᵥ)
-
-    # # NOTE the below method is the same, but about 10x slower and 10x #allocations
-    # qₛ, qᵥ = q[1], q[2:4]
-    # M = [qₛ     -qᵥ';                
-    #      qᵥ  (qₛ * I - hat(qᵥ)) ]
+    M[1, 2:4] .= -qᵥ      
+    M[2:4, 1] .=  qᵥ       
+    M[2:4, 2:4] .= rHat(qₛ, qᵥ) 
 
     return M
 end
 
 function R(q::SVector{4, T})::Matrix{T} where {T}
     qₛ = q[1]
-    qᵥ = view(q, 2:4)      # ≈ 2ns for the pair
+    qᵥ = view(q, 2:4)     
 
-    M = zeros(T, 4, 4)     # 25 ns, 1 alloc 200 byte
-    M[1, 1] = q[1]         # 1 ns, 0 alloc
+    M = zeros(T, 4, 4)     
+    M[1, 1] = q[1]         
 
-    M[1, 2:4] .= -qᵥ       # 30 ns, 1 alloc, 112 bytes  (b/c negative)
-    M[2:4, 1] .=  qᵥ       # 20 ns, 0 alloc
-    M[2:4, 2:4] .= rHat(qₛ, qᵥ) #  About 150ns slower, 3 fewer alloc, and 400 fewer bytes
-
-    # # NOTE the below method is the same, but about 10x slower and 10x #allocations
-    # qₛ, qᵥ = q[1], q[2:4]
-    # M = [qₛ     -qᵥ';                
-    #      qᵥ  (qₛ * I - hat(qᵥ)) ]
+    M[1, 2:4] .= -qᵥ      
+    M[2:4, 1] .=  qᵥ       
+    M[2:4, 2:4] .= rHat(qₛ, qᵥ) 
 
     return SMatrix{4, 4, T, 16}(M)
 end
 
+                                        #######################
+                                        # `H` and `T` Methods #
+                                        #######################
 
-const Hs = SMatrix{4, 3, Float64, 12}([zeros(1, 3); I(3)])
+const Hs = SMatrix{4, 3, Float64, 12}([zeros(1, 3); I(3)])  # Static equivalent
 const H = [zeros(1, 3); I(3)]     # Converts from a 3-element vector to a 4-element vector with 0 scalar part 
-
 const T = [1 0 0 0; 0 -1 0 0; 0 0 -1 0; 0 0 0 -1]   # Forms the conjugate of q, i.e. q† = Tq   
-
 qconj(q) = [1 0 0 0; 0 -1 0 0; 0 0 -1 0; 0 0 0 -1] * q
 
-# Add test - L(q₂) q₁ == R(q₁) * q₂
+                                        ##############
+                                        # Arithmatic #
+                                        ##############
 function qmult(q₁, q₂)
     return L(q₁) * q₂
 end
@@ -192,36 +187,17 @@ end
 ⊙(q₁, q₂) = qmult(q₁, q₂)
 
 # Takes q and ω → q̇
-function qdot(q::Vector{T}, ω::Vector{T}) where {T}
-    q̇ = 0.5 * L(q) * H * ω
+qdot(q::Vector{T}, ω::Vector{T})         where {T} = 0.5 * L(q) * H * ω
+qdot(q::SVector{4, T}, ω::SVector{3, T}) where {T} = 0.5 * L(q) * Hs * ω
+qdot(q::SubArray{T}, ω::SubArray{T})     where {T} = 0.5 * L(q) * H * ω
 
-    return q̇
-end
 
-function qdot(q::SVector{4, T}, ω::SVector{3, T}) where {T}
-    q̇ = 0.5 * L(q) * Hs * ω
+quat2rot(q::Vector) = H' * L(q) * R(q)' * H
+quat2rot(q::SVector{4, T}) where {T} =  SMatrix{3, 3, T, 9}(H' * L(q) * R(q)' * H)
 
-    return q̇
-end
 
-function qdot(q::SubArray{T}, ω::SubArray{T}) where {T}
-    q̇ = 0.5 * L(q) * H * ω
 
-    return q̇
-end
-
-function quat2rot(q::Vector)
-    return H' * L(q) * R(q)' * H
-end
-
-function quat2rot(q::SVector{4, T}) where {T} 
-    return SMatrix{3, 3, T, 9}(H' * L(q) * R(q)' * H)
-end
-
-function att_jac(q)
-    return G(SVector{4, typeof(q)}(q))
-end
-
+""" Attitude Jacobian to convert between the Jacobian of 3 and 4 element attitude representations """
 function G(q::SVector{4, T}) where {T}
     qₛ = q[1] 
     qᵥ = q[2:4]
@@ -232,6 +208,8 @@ function G(q::SVector{4, T}) where {T}
 
     return G
 end
+att_jac(q) = G(SVector{4, typeof(q)}(q))
+
 
 
 
@@ -293,16 +271,4 @@ function hamilton(q₁, q₂)
     v = (s₁ * v₂ + s₂ * v₁ + cross(v₁, v₂))
     return [s; v]
 end;
-
-# @testset "Rot 2 Quat" begin 
-#     N = 1000
-#     ts = zeros(N)
-#     for i = 1:N
-
-#         q = randn(4); q /= norm(q)
-#         q̂ = rot2quat(quat2rot(q))
-#         ts[i] = ((q ≈ q̂) || (q ≈ -q̂))
-#     end
-#     @test all(ts .== 1)
-# end
 

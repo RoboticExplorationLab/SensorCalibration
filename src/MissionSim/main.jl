@@ -159,6 +159,9 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
     return results
 end
 
+
+
+# Helper functions
 function get_initial_state(; _Re = 6378136.3, detumbled = false, bias_less = false) 
     ecc = 0.0001717 + 0.001 * randn()
     inc = 51.6426 + 5 * randn()
