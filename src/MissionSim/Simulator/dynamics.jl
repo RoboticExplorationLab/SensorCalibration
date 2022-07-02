@@ -1,20 +1,13 @@
-# [src/MissionSim/Simulator/dynamics.jl]
+# [src/Simulator/dynamics.jl]
 
 """
-      Contains the code used in the Simulator to update 
-    the state of the satellite.
-
     To Do:
       Add:
-      - Add in drag that is dependent on orientation? and SRP
-      - Process noise...? Maybe?
+      - Add in drag, SRP that is dependent on orientation
 
       Fix/Update:
-      - Get accurate defaults for accel_perturbations
       - Get accurate gyro bias values
       - Speed up accel_perturbations? (it is ≈50x slower than the rest combined)
-      - More sophisticated method for quaternions than just normalizing (matrix exponential?)
-      - add tick marks `` to argument names in descriptions
 """
 
 

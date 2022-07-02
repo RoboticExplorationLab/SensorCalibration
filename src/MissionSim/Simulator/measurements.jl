@@ -1,26 +1,21 @@
-# [src/MissionSim/Simulator/measurements.jl]
+# [src/Simulator/measurements.jl]
 
 """
       Contains the code used in the Simulator to generate 
     the measurements for each of the sensors.
 
     To Do:
-      Add:
 
       Fix/Update:
       - These noise values are almost entirely arbitrary; get better ones
-      - diode_meas is reaaaaal slow (2.8ms / 19 / 413 KiB)  -> earth_albedo takes up 2.241 ms of that, but if we downsample albedo before...
+      - diode_meas is reaaaaal slow (2.8ms / 19 / 413 KiB)  (-> earth_albedo takes up 2.241 ms of that)
       - IGRF in mag_meas is also slow ∼ μs
-      - (Validate - σ_scales used when additive noise, σ for rotation noise, ya?)
-      - (Verify - no need for μ in gyro, pos? No need for noise in sun?)
-      - Should get_calib_matrix be static?
 """
 
 
-
 # If these change, change the state_machine defaults as well.
-# σ_current, gyro  no longer scales, but matches the values in On-Orbit. I do noise on mag with rotation, not noise, but I ran some 
-#   tests to determine what the angular distance corresponded to 0.25deg
+# Magnetometer noise is composed using a rotation, as opposed to the additive method used in On-Orbit Calibration..., but I ran some tests and 
+# estimated that their angular distance corresponds to a 0.25deg rotation.
 """
     generate_measurements(sat, alb, x, t, dt; E_am₀, σB, σ_gyro_scale, σr, σ_current_scale)
 
@@ -162,7 +157,6 @@ function pos_measurement(x::STATE; σ = 1e4)
     return x.r, r̃, ηr
 end
 
-# NOTE i am not scaling sᴵ, sᴮ by ecl anymore, nor am I adding noise to sᴮ
 """
     Generates the sun vector in the body and inertial frames, as well as whether or not the 
     sun is being eclipsed by the Earth (from the satellite's perspective).
@@ -189,7 +183,7 @@ function sun_measurement(x::STATE, ᴮQᴵ::SMatrix{3, 3, T, 9}, t::Epoch)::Tupl
     return sᴵ, sᴮ, ecl
 end
 
-# VERY slow (≈ 3ms); (NOTE - Clips to zero 𝑎𝑓𝑡𝑒𝑟 adding noise, so should do the same on est)
+# VERY slow (≈ 3ms); 
 """ 
       Generates the photodiode currents and noisy current measurements.
     (NOTE that current generated cannot be negative so these are clipped at zero)
@@ -256,8 +250,6 @@ end
 # HELPER FUNCTIONS #  Could probably go in a shared file
 ####################
 
-
-#  Do I need dt? -> Not for sensor noise ?
 """
       Generates a [3 × 3] noise rotation matrix by generating a random axis of rotation and the 
     angle by which to rotate about the axis. This axis-angle representation is then converted
