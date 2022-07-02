@@ -123,9 +123,9 @@ function estimate(sat::SATELLITE{N, T}, sens::SENSORS{N, T}, noise::MEKF_DATA{T}
 
     # Prepare data 
     sᴵₑ_est = sun_position(t)               # Estimated Sun-Earth vector in inertial frame
-    if (calibrate_diodes) && (eclipse_cylindrical(vcat([sens.pos;]...), sᴵₑ_est) < 0.001) 
-        @warn "Shouldnt have an eclipse in MEKF!"
-    end
+    # if (calibrate_diodes) && (eclipse_cylindrical(vcat([sens.pos;]...), sᴵₑ_est) < 0.001) 
+    #     @warn "Shouldnt have an eclipse while calibrating in MEKF!"
+    # end
 
     sᴵ_est = sᴵₑ_est - sens.pos             # Estimated sun vector
     Bᴵ_est = SVector{3, T}(IGRF13(sens.pos, t))           # Estimated magnetic field vector in inertial
@@ -573,7 +573,7 @@ end
 
 
 
-@info "Compute diode albedo in Measurement too"
+# Same as the one in measurement
 function compute_diode_albedo(data::Matrix{T}, cell_centers_ecef::Array{T, 3}, surface_normal::SVector{3, T}, sat_pos::SVector{3, T}) where {T}
 
     Nlat, Nlon = size(data)

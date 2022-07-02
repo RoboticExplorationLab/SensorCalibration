@@ -249,7 +249,7 @@ end;
 
 
 # @info "No Noise!"; results = main(; σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
-# @info "Full Noise!"; results = main(); 
+@info "Full Noise!"; results = main(); 
 # sat_truth, sat_est, truths, sensors, ecls, noises, states, sat_ests, op_modes 
 
 # display(plot(results[:states]))

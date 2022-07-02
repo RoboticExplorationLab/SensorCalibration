@@ -16,7 +16,6 @@
       - Should get_calib_matrix be static?
 """
 
-@info "Remove Infiltrator!"; using Infiltrator
 
 
 # If these change, change the state_machine defaults as well.
@@ -218,8 +217,8 @@ end
 function diode_measurement(sat::SATELLITE{N, T}, alb::ALBEDO, x::STATE{T}, ecl::Real, sᴵ::SVector{3, T}, sᴮ::SVector{3, T}; 
                             σ_scale = 0.05, E_am₀ = 1366.9, use_albedo = true)::Tuple{SVector{N, T}, SVector{N, T}, SVector{N, T}} where {N, T}
 
-    if (ecl == 0)   # No need to waste time calculating in eclipse - I = 0, Ĩ is just noise
-        η = SVector{N, T}(rand(Normal(0.0, σ_scale * 0.001), N))
+    if (ecl < 0.001)   # No need to waste time calculating in eclipse - I = 0, Ĩ is just noise
+        η = SVector{N, T}(rand(Normal(0.0, σ_scale * 0.002), N))
         return SVector{N, T}(zeros(N)), η, η
     else 
 
