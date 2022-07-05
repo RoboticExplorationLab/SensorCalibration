@@ -43,7 +43,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
 
     ### Set up desired starting state
     if initial_mode == detumble 
-        """ Default initial state. Sat est initializes to all ideals"""
+        """ Default initialdiode_cal state. Sat est initializes to all ideals"""
         x₀, T_orbit = get_initial_state(; detumbled = false)
         flags = FLAGS(; init_detumble = false, mag_cal = false, dio_cal = false, final_detumble = false, in_sun = false)
         sat_truth = SATELLITE(; sta =  SAT_STATE(; q = x₀.q, β = x₀.β))
@@ -55,7 +55,8 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
         x₀, T_orbit = get_initial_state(; detumbled = true)
         flags = FLAGS(; init_detumble = true)
         sat_truth = SATELLITE(; sta =  SAT_STATE(; q = x₀.q, β = x₀.β))
-        sat_est   = SATELLITE(; J = sat_truth.J, sta = SAT_STATE(; ideal = true), mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true))
+        sat_est   = SATELLITE(; J = sat_truth.J, sta = SAT_STATE(; ideal = true), mag = MAGNETOMETER(; ideal = true), dio = sat_truth.diodes)
+
         op_mode   = detumble  # Will switch over after first iteration
 
     elseif initial_mode == diode_cal
@@ -112,10 +113,10 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
 
         if verbose
             # Evaluate detumbling 
-            (prev_mode == detumble) && (op_mode != detumble) && detumbler_report(states[1:i - 1], sensors[1:i - 1])
+            (prev_mode == detumble) && (op_mode != detumble) && (initial_mode != mag_cal) && detumbler_report(states[1:i - 1], sensors[1:i - 1])
 
             # Evaluate performance of magnetometer calibration 
-            (prev_mode ==   mag_cal) && (op_mode != mag_cal) && magnetometer_calibration_report(sat_truth, sat_est, sat_ests[1])
+            (prev_mode ==  mag_cal) && (op_mode != mag_cal) && (flags.magnetometer_calibrated) && magnetometer_calibration_report(sat_truth, sat_ests[1:i-1])
 
             # Evaluate performance of diode calibration 
             (prev_mode == diode_cal) && (op_mode != diode_cal) && (flags.diodes_calibrated) && diode_calibration_report(sat_truth, sat_ests[1:i-1]) 
@@ -251,11 +252,15 @@ end;
 # end
 
 
-# @info "No Noise!"; results = main(; σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
-@info "Full Noise!"; results = main(); 
+# @info "No Noise!"; results = main(; num_orbits = 1.0, initial_mode = mag_cal, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
+Random.seed!(1001)
+# @info "Partial Noise!"; results = main(; num_orbits = 2.0, initial_mode = mag_cal, σB = deg2rad(0.1), σ_gyro = 1e-2, σr = 1e3, σ_current = 0.01);
+@info "Full Noise!"; results = main(; num_orbits = 2.0, initial_mode = mag_cal); 
 # sat_truth, sat_est, truths, sensors, ecls, noises, states, sat_ests, op_modes 
 
 # display(plot(results[:states]))
 # display(plot(results[:sensors]))
 # diode_calibration_report(results)
 # mekf_report(results)
+
+println("Done!")

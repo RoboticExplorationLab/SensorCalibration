@@ -11,23 +11,17 @@ struct SAT_COVARIANCE{T}
     Σ::Matrix{T}   # Covariance matrix for satellite state
     N::Int         # Number of diodes
 
-    function SAT_COVARIANCE(ϕ, β, C, α, ϵ)
-        N = size(C, 1)
+    function SAT_COVARIANCE(ϕ, βᵧ, s, ζ, βₘ)
+        N = 3 #size(s, 1)
         Tt = typeof(ϕ[1])
 
-        ℓ = 6 + 3 * N 
+        ℓ =15
         Σ = zeros(Tt, ℓ, ℓ)
         Σ[1:3, 1:3] .= ϕ
-        Σ[4:6, 4:6] .= β 
-
-        i₀ = 7; i = i₀ - 1 + N
-        Σ[i₀:i, i₀:i]   .= C 
-
-        i₀ = i + 1; i = i₀ - 1 + N
-        Σ[i₀:i, i₀:i] .= α 
-
-        i₀ = i + 1; i = i₀ - 1 + N
-        Σ[i₀:i, i₀:i] .= ϵ
+        Σ[4:6, 4:6] .= βᵧ
+        Σ[7:9, 7:9] .= s 
+        Σ[10:12, 10:12] .= ζ 
+        Σ[13:15, 13:15] .= βₘ
 
         Σ = cholesky(Hermitian(Matrix(Σ))).U
 
@@ -35,15 +29,15 @@ struct SAT_COVARIANCE{T}
     end
 
     ## Not sure if noise is right!
-    function SAT_COVARIANCE(; σϕ = deg2rad(10), σβ = deg2rad(10), σC = 0.1, σα = deg2rad(3), σϵ = deg2rad(3), N = 6)
+    function SAT_COVARIANCE(; σϕ = deg2rad(10), σβᵧ = deg2rad(10), σs = 0.25, σζ = deg2rad(5), σβₘ = deg2rad(6.0))  # 0.1, 3, 4
         """ random """
-        Σϕ = diagm( (σϕ^2) * ones(3) )
-        Σβ = diagm( (σβ^2) * ones(3) )
-        ΣC = diagm( (σC^2) * ones(N) )
-        Σα = diagm( (σα^2) * ones(N) )
-        Σϵ = diagm( (σϵ^2) * ones(N) )
+        Σϕ  = diagm( (σϕ^2) * ones(3) )
+        Σβᵧ = diagm( (σβᵧ^2) * ones(3) )
+        Σs  = diagm( (σs^2) * ones(3) )
+        Σζ  = diagm( (σζ^2) * ones(3) )
+        Σβₘ = diagm( (σβₘ^2) * ones(3) )
         
-        SAT_COVARIANCE(Σϕ, Σβ, ΣC, Σα, Σϵ)
+        SAT_COVARIANCE(Σϕ, Σβᵧ, Σs, Σζ, Σβₘ)
     end
 end
 function ϕ(cov::SAT_COVARIANCE{T}) where {T}
@@ -51,22 +45,4 @@ function ϕ(cov::SAT_COVARIANCE{T}) where {T}
 end
 function β(cov::SAT_COVARIANCE{T}) where {T}
     return SMatrix{3, 3, T, 9}(cov.Σ[4:6, 4:6])
-end
-function C(cov::SAT_COVARIANCE{T}) where {T}
-    N = cov.N
-    i₀ = 4
-    i  = i₀ + N - 1
-    return SMatrix{N, N, T, N * N}(cov.Σ[i₀:i, i₀:i])
-end
-function α(cov::SAT_COVARIANCE{T}) where {T}
-    N = cov.N
-    i₀ = 4 + N
-    i  = i₀ + N - 1
-    return SMatrix{N, N, T, N * N}(cov.Σ[i₀:i, i₀:i])
-end
-function ϵ(cov::SAT_COVARIANCE{T}) where {T}
-    N = cov.N
-    i₀ = 4 + 2 * N
-    i  = i₀ + N - 1
-    return SMatrix{N, N, T, N * N}(cov.Σ[i₀:i, i₀:i])
 end

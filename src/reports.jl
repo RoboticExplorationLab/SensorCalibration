@@ -4,19 +4,27 @@
     Contains functions for evaluating the performance of the Sim/Filter setup 
 """
 
-function magnetometer_calibration_report(sat_true, sat_est, sat_init) 
+function magnetometer_calibration_report(sat_true::SATELLITE, est_hist::Vector{SATELLITE{6, T}}) where {T}
+    N = size(est_hist, 1)
+    s_est, ζ_est, β_est = zeros(3, N), zeros(3, N), zeros(3, N);
 
-    aᶠ, bᶠ, cᶠ = round.(sat_est.magnetometer.scale_factors, sigdigits = 3)
-    ρᶠ, λᶠ, ϕᶠ = round.(sat_est.magnetometer.non_ortho_angles, sigdigits = 3)
-    βxᶠ, βyᶠ, βzᶠ = round.(sat_est.magnetometer.bias, sigdigits = 3)
+    for i = 1:N
+        s_est[:, i] = est_hist[i].magnetometer.scale_factors
+        ζ_est[:, i] = rad2deg.(est_hist[i].magnetometer.non_ortho_angles)
+        β_est[:, i] = est_hist[i].magnetometer.bias
+    end
+
+    aᶠ, bᶠ, cᶠ = round.(est_hist[N].magnetometer.scale_factors, sigdigits = 3)
+    ρᶠ, λᶠ, νᶠ = round.(rad2deg.(est_hist[N].magnetometer.non_ortho_angles), sigdigits = 3)
+    βxᶠ, βyᶠ, βzᶠ = round.(est_hist[N].magnetometer.bias, sigdigits = 3)
 
     a, b, c = round.(sat_true.magnetometer.scale_factors, sigdigits = 3)
-    ρ, λ, ϕ = round.(sat_true.magnetometer.non_ortho_angles, sigdigits = 3)
+    ρ, λ, ν = round.(rad2deg.(sat_true.magnetometer.non_ortho_angles), sigdigits = 3)
     βx, βy, βz = round.(sat_true.magnetometer.bias, sigdigits = 3)
 
-    a₀, b₀, c₀ = round.(sat_init.magnetometer.scale_factors, sigdigits = 3)
-    ρ₀, λ₀, ϕ₀ = round.(sat_init.magnetometer.non_ortho_angles, sigdigits = 3)
-    βx₀, βy₀, βz₀ = round.(sat_init.magnetometer.bias, sigdigits = 3)
+    a₀, b₀, c₀ = round.(est_hist[1].magnetometer.scale_factors, sigdigits = 3)
+    ρ₀, λ₀, ν₀ = round.(rad2deg.(est_hist[1].magnetometer.non_ortho_angles), sigdigits = 3)
+    βx₀, βy₀, βz₀ = round.(est_hist[1].magnetometer.bias, sigdigits = 3)
 
     println("__________________________________________________________________________")
     println("___PARAM___|___Truth____|__Final Guess__|__Init Guess__|__Improved?__")
@@ -25,15 +33,33 @@ function magnetometer_calibration_report(sat_true, sat_est, sat_init)
     println("     c     |   $c\t|    $cᶠ  \t|    $c₀       | ", abs(c - cᶠ) < abs(c - c₀) ? "    Yes!" : "   No!")
     println("     ρ°    |   $ρ\t|    $ρᶠ  \t|    $ρ₀       | ", abs(ρ - ρᶠ) < abs(ρ - ρ₀) ? "    Yes!" : "   No!")
     println("     λ°    |   $λ\t|    $λᶠ  \t|    $λ₀       | ", abs(λ - λᶠ) < abs(λ - λ₀) ? "    Yes!" : "   No!")
-    println("     ϕ°    |   $ϕ\t|    $ϕᶠ  \t|    $ϕ₀       | ", abs(ϕ - ϕᶠ) < abs(ϕ - ϕ₀) ? "    Yes!" : "   No!")
+    println("     ν°    |   $ν\t|    $νᶠ  \t|    $ν₀       | ", abs(ν - νᶠ) < abs(ν - ν₀) ? "    Yes!" : "   No!")
     println("     βx    |   $βx\t|    $βxᶠ \t|    $βx₀       | ", abs(βx - βxᶠ) < abs(βx - βx₀) ? "    Yes!" : "   No!")
     println("     βy    |   $βy\t|    $βyᶠ \t|    $βy₀       | ", abs(βy - βyᶠ) < abs(βy - βy₀) ? "    Yes!" : "   No!")
     println("     βz    |   $βz\t|    $βzᶠ \t|    $βz₀       | ", abs(βz - βzᶠ) < abs(βz - βz₀) ? "    Yes!" : "   No!")
     println("__________________________________________________________________________")
 
+    s_off, ζ_off, β_off = 0.25, 5, 0.25
+    ##### PLOT ##### 
+    ap = plot(s_est[1, :], title = "Scale Factor a", label = false); ap = hline!([a₀], ls = :dot, label = false); ap = hline!([a], ls = :dash, label = false, ylim = [a - s_off, a + s_off]);
+    bp = plot(s_est[2, :], title = "Scale Factor b", label = false); bp = hline!([b₀], ls = :dot, label = false); bp = hline!([b], ls = :dash, label = false, ylim = [b - s_off, b + s_off]);
+    cp = plot(s_est[3, :], title = "Scale Factor c", label = false); cp = hline!([c₀], ls = :dot, label = false); cp = hline!([c], ls = :dash, label = false, ylim = [c - s_off, c + s_off]);
+    
+    ρp = plot(ζ_est[1, :], title = "Non-Ortho Angles ρ", label = false); ρp = hline!([ρ₀], ls = :dot, label = false); ρp = hline!([ρ], ls = :dash, label = false, ylim = [ρ - ζ_off, ρ + ζ_off]);
+    λp = plot(ζ_est[2, :], title = "Non-Ortho Angles λ", label = false); λp = hline!([λ₀], ls = :dot, label = false); λp = hline!([λ], ls = :dash, label = false, ylim = [λ - ζ_off, λ + ζ_off]);
+    νp = plot(ζ_est[3, :], title = "Non-Ortho Angles ν", label = false); νp = hline!([ν₀], ls = :dot, label = false); νp = hline!([ν], ls = :dash, label = false, ylim = [ν - ζ_off, ν + ζ_off]);
+    
+    xp = plot(β_est[1, :], title = "Bias x", label = false); xp = hline!([βx₀], ls = :dot, label = false); xp = hline!([βx], ls = :dash, label = false, ylim = [βx - β_off, βx + β_off]);
+    yp = plot(β_est[2, :], title = "Bias y", label = false); yp = hline!([βy₀], ls = :dot, label = false); yp = hline!([βy], ls = :dash, label = false, ylim = [βy - β_off, βy + β_off]);
+    zp = plot(β_est[3, :], title = "Bias z", label = false); zp = hline!([βz₀], ls = :dot, label = false); zp = hline!([βz], ls = :dash, label = false, ylim = [βz - β_off, βz + β_off]);
+    
+    display(plot(ap, bp, cp))
+    display(plot(ρp, λp, νp))
+    display(plot(xp, yp, zp))
+    
     return nothing
 end;
-magnetometer_calibration_report(results::NamedTuple) = magnetometer_calibration_report(results[:sat_truth], results[:sat_ests][end], results[:sat_ests][1])
+magnetometer_calibration_report(results::NamedTuple) = magnetometer_calibration_report(results[:sat_truth], results[:sat_ests])
 
 
 function diode_calibration_report(sat_true::SATELLITE, est_hist::Vector{SATELLITE{6, T}}) where {T} 

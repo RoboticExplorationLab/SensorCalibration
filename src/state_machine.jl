@@ -106,10 +106,13 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             if !(flags.in_sun)
                 next_mode = chill
             else
+                q = run_triad(sensors, sat_est, t, flags.in_sun)  # x.q 
+                sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
                 next_mode = mag_cal 
-                Bᴵ_pred = IGRF13(sensors.pos, t)
-                N_samples = Int(round(2 * T_orbit / (mag_ds_rate)))
-                data = MAG_CALIBRATOR(N_samples, vcat([sensors.magnetometer;]...), Bᴵ_pred);
+                # Bᴵ_pred = IGRF13(sensors.pos, t)
+                # N_samples = Int(round(2 * T_orbit / (mag_ds_rate)))
+                # data = MAG_CALIBRATOR(N_samples, vcat([sensors.magnetometer;]...), Bᴵ_pred);
+                data = MEKF_DATA()
             end
         else 
             next_mode = detumble # Keep detumbling  
@@ -130,33 +133,24 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             to 'chill' and waits.
         """ 
 
-        notes = "Mode: $op_mode \tSamples: $(data.idx[1])/$(data.N)"
+        # notes = "Mode: $op_mode \tSamples: $(data.idx[1])/$(data.N)"
 
         # Downsample 
-        if idx % (mag_ds_rate / dt) == 0
-            Bᴵ_pred = IGRF13(sensors.pos, t)  # Because this is attitude-independent we just use Bᴵ
-            i = Estimator.update!(data, sensors.magnetometer, Bᴵ_pred)
+        if true 
+            if !(flags.in_sun)
+                next_mode = chill 
+            else 
+                sat_est = Estimator.estimate(sat_est, sensors, data, alb, t, dt; use_albedo = use_albedo, calibrate_magnetometer = true)
 
-            # Once enough data has been gathered...
-            if i == data.N 
-                sat_est = Estimator.estimate(sat_est, data)
-                next_mode = (flags.in_sun) ? diode_cal : chill 
-                flags.magnetometer_calibrated = true 
-
-                if flags.in_sun 
-
-                    data = MEKF_DATA()
-                    reset_cov!(sat_est; reset_calibration = true)
-                    q = run_triad(sensors, sat_est, t, flags.in_sun)
-                    # q = x.q; @info "Using true q in mag cal!"
-                    sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
-
+                # Check if covariance of calibration states is low enough to fix
+                if norm(sat_est.covariance[7:end, 7:end]) < 0.1 * calib_cov_thres 
+                    next_mode = finished # detumble 
+                    flags.diodes_calibrated = true 
                 end
+
+                notes = "mode: $op_mode \t||Σ|| = $(round(norm(sat_est.covariance[7:end, 7:end]), digits = 4)),\t ||Σs|| = $(round(norm(sat_est.covariance[7:9, 7:9]), digits = 4)) \t ||Σζ|| = $(round(norm(sat_est.covariance[10:12, 10:12]), digits = 4)) \t ||Σβ|| = $(round(norm(sat_est.covariance[13:15, 13:15]), digits = 4))"
             end
         end
-
-
-
 
     elseif op_mode == chill     # -> diode_cal, (mekf?)
         """ chill -> diode_cal 
@@ -168,7 +162,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             Transitions to 'diode_cal' as soon as the eclipse is over. 
         """
         if flags.in_sun 
-            next_mode = diode_cal 
+            next_mode = mag_cal # diode_cal 
 
             data = MEKF_DATA()
             q = run_triad(sensors, sat_est, t, flags.in_sun)  # x.q 
@@ -223,7 +217,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
         if false #!(flags.in_sun)
             next_mode = chill 
         else
-            sat_est = Estimator.estimate(sat_est, sensors, data, alb, t, dt; use_albedo = use_albedo, calibrate_diodes = false)
+            sat_est = Estimator.estimate(sat_est, sensors, data, alb, t, dt; use_albedo = use_albedo, calibrate_magnetometer = false)
 
             if norm(sat_est.covariance[1:6, 1:6]) < mekf_cov_thres 
                 next_mode = finished 
@@ -253,6 +247,8 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
     ProgressMeter.next!(progress_bar; showvalues = [(:Mode, op_mode), (:Iteration, idx), (:Notes, notes)])
     return sat_truth, sat_est, x⁺, t, next_mode, data, truth, sensors, ecl, noise
 end
+
+
 
 """ run_triad(sensors, sat_est, t, in_sun)
 
