@@ -28,6 +28,7 @@ struct MEKF_DATA{T}
 
     function MEKF_DATA(; N = 6, σ_mag = deg2rad(3.0), σ_cur = 0.1,
                             σs = 1e-4, σζ = deg2rad(0.01),  
+                            σC = 1e-4, σα = deg2rad(0.01), σϵ = deg2rad(0.01),
                             gyro_bias_instability = 0.8,   # in deg/hour  
                             angle_random_walk     = 0.06)  # in deg/sqrt(hour)
 
@@ -38,7 +39,7 @@ struct MEKF_DATA{T}
         σ_bias = deg2rad(angle_random_walk) / 60.0        # Convert (deg/sqrt(hour)) to ( rad/sqrt(s) )
         
         # Just using the same bias noise for both 
-        W = Diagonal( [σ_gyro * ones(3); σ_bias * ones(3); σs * ones(3); σζ * ones(3); 10 * σ_bias * ones(3)].^2 )
+        W = Diagonal( [σ_gyro * ones(3); σ_bias * ones(3); σs * ones(3); σζ * ones(3); 10 * σ_bias * ones(3); σC * ones(N); σα * ones(N); σϵ * ones(N)].^2 )
         Wchol = chol(Matrix(W)) 
         
         ## Measurement Noise:
@@ -62,7 +63,7 @@ end
     Note that this covariance uses 3 parameters for the attitude to prevent dropping rank.
 """
 function reset_cov!(sat::SATELLITE{N, T}; reset_calibration = false, σϕ = deg2rad(10), σβ = deg2rad(10), 
-                        σs = 0.3, σζ = deg2rad(9), σβₘ = deg2rad(12)) where {N, T}
+                        σs = 0.3, σζ = deg2rad(9), σβₘ = deg2rad(12), σC = 0.3, σα = deg2rad(9.0), σϵ = deg2rad(9)) where {N, T}
     
     # # Update Covariances 
     # Reset q, increase β, pass C, α, and ϵ
@@ -76,16 +77,25 @@ function reset_cov!(sat::SATELLITE{N, T}; reset_calibration = false, σϕ = deg2
         sat.covariance[7:9, 7:9] .= diagm(σs * ones(3))
         sat.covariance[10:12, 10:12] .= diagm(σζ * ones(3))
         sat.covariance[13:15, 13:15] .= diagm(σβₘ * ones(3))
+
+        i₀ = 16; i₁ = i₀ + N - 1
+        sat.covariance[i₀:i₁, i₀:i₁] .= diagm(σC * ones(N))
+
+        i₀ = i₁ + 1; i₁ = i₀ + N - 1
+        sat.covariance[i₀:i₁, i₀:i₁] .= diagm(σα * ones(N))
+
+        i₀ = i₁ + 1; i₁ = i₀ + N - 1
+        sat.covariance[i₀:i₁, i₀:i₁] .= diagm(σϵ * ones(N))
     end
 
     return Nothing
 end
 
 """
-    estimate(sat, sens, noise, alb, t, dt; use_albedo = true, calibrate_magnetometer = true)
+    estimate(sat, sens, noise, alb, t, dt; use_albedo = true, calibrate = true)
 
       Calls a single iteration of the multiplicative extended Kalman filter, updating the 
-    satellite attitude and bias estimates. Additionally, if the 'calibrate_magnetometer' flag is 
+    satellite attitude and bias estimates. Additionally, if the 'calibrate' flag is 
     set to 'true', this updates estimates of the diode calibration factors (C, α, and ϵ).
     Note that this function should NOT be called during eclipses (for now...).
 
@@ -99,13 +109,13 @@ end
 
       - `E_am₀`:  (Opt) Irradiance of sunlight (TSI - visible & infrared). Default is 1366.0 W/m²  |  Scalar
       - `use_albedo`:  (Opt) Whether or not to factor in Earth's albedo  (defaults to 'true')      |  Bool 
-      - `calibrate_magnetometer`:  (Opt) Whether or not to update diode estimates (defaults to 'true')   |  Bool
+      - `calibrate`:  (Opt) Whether or not to update diode estimates (defaults to 'true')   |  Bool
 
     Returns:
         - `sat`:  Updated satellite struct containing new estimates           |  SATELLITE
 """  
 function estimate(sat::SATELLITE{N, T}, sens::SENSORS{N, T}, noise::MEKF_DATA{T}, alb::ALBEDO, t::Epoch, dt::Real; 
-                    E_am₀ = 1366.9, use_albedo = true, calibrate_magnetometer = true) where {N, T}
+                    E_am₀ = 1366.9, use_albedo = true, calibrate = true) where {N, T}
 
     # Prepare data 
     sᴵₑ_est = sun_position(t)               # Estimated Sun-Earth vector in inertial frame
@@ -114,17 +124,17 @@ function estimate(sat::SATELLITE{N, T}, sens::SENSORS{N, T}, noise::MEKF_DATA{T}
     Bᴵ_est = SVector{3, T}(IGRF13(sens.pos, t))           # Estimated magnetic field vector in inertial
 
     # Pass into square-root MEKF 
-    Pchol = (calibrate_magnetometer) ? sat.covariance : sat.covariance[1:6, 1:6]
-    Wchol = (calibrate_magnetometer) ? noise.Wchol    : UpperTriangular(noise.Wchol[1:6, 1:6])
-    x⁺, mag⁺, Pchol⁺ = sqrt_mekf(sat.state, sat.diodes, sat.magnetometer, Pchol, alb, sens.gyro, Bᴵ_est, sᴵ_est,
+    Pchol = (calibrate) ? sat.covariance : sat.covariance[1:6, 1:6]
+    Wchol = (calibrate) ? noise.Wchol    : UpperTriangular(noise.Wchol[1:6, 1:6])
+    x⁺, mag⁺, diode⁺, Pchol⁺ = sqrt_mekf(sat.state, sat.diodes, sat.magnetometer, Pchol, alb, sens.gyro, Bᴵ_est, sᴵ_est,
                              sens.magnetometer, sens.diodes, sens.pos, dt, Wchol, noise.Vchol; 
-                             use_albedo = use_albedo, calibrate_magnetometer = calibrate_magnetometer, E_am₀ = E_am₀)
+                             use_albedo = use_albedo, calibrate = calibrate, E_am₀ = E_am₀)
 
 
     # Process result and update sat (by making a new copy)
-    sat⁺ = SATELLITE(deepcopy(sat.J), mag⁺, deepcopy(sat.diodes), x⁺, copy(sat.covariance) )
+    sat⁺ = SATELLITE(deepcopy(sat.J), mag⁺, diode⁺, x⁺, copy(sat.covariance) )
 
-    if calibrate_magnetometer 
+    if calibrate 
         sat⁺.covariance .= Pchol⁺
     else
         sat⁺.covariance[1:6, 1:6] .= Pchol⁺
@@ -133,73 +143,77 @@ function estimate(sat::SATELLITE{N, T}, sens::SENSORS{N, T}, noise::MEKF_DATA{T}
     return sat⁺
 end
 
-""" sqrt_mekf(x, diodes, Pchol, alb, ω, Bᴵ, sᴵ, B̃ᴮ, Ĩ, pos, dt, W, V; E_am₀, use_albedo, calibrate_magnetometer)
+""" sqrt_mekf(x, diodes, Pchol, alb, ω, Bᴵ, sᴵ, B̃ᴮ, Ĩ, pos, dt, W, V; E_am₀, use_albedo, calibrate)
 
       Runs a single iteration of a square-root multiplicative extended Kalman filter. Can also 
-    be used to calibrate diodes if 'calibrate_magnetometer' is set to true. 
+    be used to calibrate diodes if 'calibrate' is set to true. 
 """
 function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, mag::MAGNETOMETER{T}, Pchol::Matrix{T}, alb::ALBEDO, 
                     ω::SVector{3, T}, Bᴵ::SVector{3, T}, sᴵ::SVector{3, T}, B̃ᴮ::SVector{3, T}, 
                     Ĩ::SVector{N, T}, pos::SVector{3, T}, dt::T, W::UpperTriangular, V::UpperTriangular; 
-                    E_am₀ = 1366.9, use_albedo = true, calibrate_magnetometer = true) where {N, T}
+                    E_am₀ = 1366.9, use_albedo = true, calibrate = true) where {N, T}
 
 
     ### ITERATION 1 ###
     # Prediction 
-    x_pred, A = prediction(x, ω, dt, N; calibrate_magnetometer = calibrate_magnetometer)
+    x_pred, A = prediction(x, ω, dt, N; calibrate = calibrate)
     Pchol_pred = qrᵣ([Pchol * A'; W])  # Update covariance (as Cholesky)
 
-    # Measurement (do NOT normalize this, or at least not the current one)
-    B̃ᴮ_exp, H_mag = mag_measurement(x_pred, mag, Bᴵ, N; calibrate_magnetometer = calibrate_magnetometer)
+    # # Measurement (do NOT normalize this, or at least not the current one)
+    # B̃ᴮ_exp, H_mag = mag_measurement(x_pred, mag, Bᴵ, N; calibrate = calibrate)
 
-    #   If in eclipse, dont use I 
-    I_exp,  H_cur = (norm(Ĩ) > 001) ?   current_measurement(x_pred, diodes, sᴵ, pos, alb; E_am₀ = E_am₀,
-                                        use_albedo = use_albedo, calibrate_magnetometer = calibrate_magnetometer)  :
-                    (calibrate_magnetometer) ? (zeros(N), zeros(N, 15)) : (zeros(N), zeros(N, 6))                        
+    # #   If in eclipse, dont use I 
+    # I_exp,  H_cur = (norm(Ĩ) > 0.05) ?   current_measurement(x_pred, diodes, sᴵ, pos, alb; E_am₀ = E_am₀,
+    #                                     use_albedo = use_albedo, calibrate = calibrate)  :
+    #                 (calibrate) ? (zeros(N), zeros(N, 15 + 3 * N)) : (zeros(N), zeros(N, 6))                        
 
-    # Innovation 
-    z = [B̃ᴮ - B̃ᴮ_exp; Ĩ - I_exp]
-    H = [H_mag; H_cur]
-    Pchol_yy = qrᵣ([Pchol_pred * H'; V])
-    L = (((Pchol_pred' * Pchol_pred * H') / Pchol_yy) / Pchol_yy')
-    x⁺, mag⁺ = update(x_pred, mag, L, z; calibrate_magnetometer = calibrate_magnetometer) 
+    # # Innovation 
+    # z = [B̃ᴮ - B̃ᴮ_exp; Ĩ - I_exp]
+    # H = [H_mag; H_cur]
+    # Pchol_yy = qrᵣ([Pchol_pred * H'; V])
+    # L = (((Pchol_pred' * Pchol_pred * H') / Pchol_yy) / Pchol_yy')
+    # x⁺, mag⁺, diodes⁺ = update(x_pred, mag, diodes, L, z; calibrate = calibrate) 
 
+    x⁺, mag⁺, diodes⁺ = deepcopy(x_pred), deepcopy(mag), deepcopy(diodes)
+    L, H = 0.0, 0.0
+
+    # x⁺ = deepcopy(x_pred)
     # x_prior = deepcopy(x_pred)
     # mag_prior = deepcopy(mag)
-    # L, x⁺, mag⁺, H = 0, 0, 0, 0
+    # diodes_prior = deepcopy(diodes)
+    # L, H = 0, 0, 
 
-    # # Kalman Gain (how much we trust the measurement over the dynamics)
-    # for i = 1:3
-    #     # Measurement (do NOT normalize this, or at least not the current one)
-    #     B̃ᴮ_exp, H_mag = mag_measurement(x_pred, mag, Bᴵ, N; calibrate_magnetometer = calibrate_magnetometer)
+    # Kalman Gain (how much we trust the measurement over the dynamics)
+    for _ = 1:3
+        # Measurement (do NOT normalize this, or at least not the current one)
+        B̃ᴮ_exp, H_mag = mag_measurement(x⁺, mag⁺, Bᴵ, N; calibrate = calibrate)
 
-    #     #   If in eclipse, dont use I 
-    #     I_exp,  H_cur = (norm(Ĩ) > 001) ?   current_measurement(x_pred, diodes, sᴵ, pos, alb; E_am₀ = E_am₀,
-    #                                         use_albedo = use_albedo, calibrate_magnetometer = calibrate_magnetometer)  :
-    #                     (calibrate_magnetometer) ? (zeros(N), zeros(N, 15)) : (zeros(N), zeros(N, 6))                        
+        #   If in eclipse, dont use I 
+        I_exp,  H_cur = (norm(Ĩ) > 0.05) ?  current_measurement(x⁺, diodes⁺, sᴵ, pos, alb; E_am₀ = E_am₀,
+                                            use_albedo = use_albedo, calibrate = calibrate)  :
+                        (calibrate) ? (zeros(N), zeros(N, 15 + 3 * N)) : (zeros(N), zeros(N, 6))                        
 
-    #     # Innovation 
-    #     z = [B̃ᴮ - B̃ᴮ_exp; Ĩ - I_exp]
-    #     H = [H_mag; H_cur]
+        # Innovation 
+        z = [B̃ᴮ - B̃ᴮ_exp; Ĩ - I_exp]
+        H = [H_mag; H_cur]
 
-    #     # Update Covariance 
-    #     Pchol_yy = qrᵣ([Pchol_pred * H'; V])
-    #     L = (((Pchol_pred' * Pchol_pred * H') / Pchol_yy) / Pchol_yy')
+        # Update Covariance 
+        Pchol_yy = qrᵣ([Pchol_pred * H'; V])
+        L = (((Pchol_pred' * Pchol_pred * H') / Pchol_yy) / Pchol_yy')
 
-    #     x_pred, mag = update(x_prior, mag_prior, L, z; calibrate_magnetometer = calibrate_magnetometer)
-    #     x⁺, mag⁺ = deepcopy(x_pred), deepcopy(mag)
-    # end
+        x⁺, mag⁺, diodes⁺ = update(x_pred, mag, diodes, L, z; calibrate = calibrate)
+    end
 
     # Update 
     Pchol⁺ = qrᵣ([ Pchol_pred * (I - L * H)'; V * L']); 
 
 
-    return x⁺, mag⁺, Pchol⁺
+    return x⁺, mag⁺, diodes⁺, Pchol⁺
 end
 
 # Prediction function that does not use FD
 """
-    function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate_magnetometer::Bool = true) where {T}
+    function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate::Bool = true) where {T}
 
         # Generate axis-angle representation
         γ  = ω - x.β     # Corrected angular velocity 
@@ -232,7 +246,7 @@ end
         A[4:6, 4:6] .= I(3)
         # A[4:6, 1:3] .= zeros(3, 3)
 
-        if calibrate_magnetometer
+        if calibrate
             # Add in additional states if calibrating (i.e., x = [q, β, C, α, ϵ])
             Ac = zeros(T, 6 + 3 * N, 6 + 3 * N)  # Ac = [A  0; 0 I]
             Ac[1:6, 1:6] .= A 
@@ -253,7 +267,7 @@ function attitude_jacobian(q)
     return SMatrix{4, 3, Float64, 12}(G)
 end
 
-""" prediction(x, ω, dt, N; calibrate_magnetometer)
+""" prediction(x, ω, dt, N; calibrate)
 
       Predicts the next state and covariance using current state, angular velocity, and time step
     (essentially assumes a small rotation in attitude and that the other states are constant)
@@ -263,7 +277,7 @@ end
       - `ω`:  Current angular velocity estimate of the satellite            | [3,]
       - `dt`: Time step of the Simulation                                   |  Scalar
       - `N`:  Number of diodes                                              |  Int
-      - `calibrate_magnetometer`: (Opt) Whether or not to calibrate the diodes. Defaults to true.
+      - `calibrate`: (Opt) Whether or not to calibrate the diodes. Defaults to true.
 
     Returns:
       - `xn`: Predicted next state  [(q⃗, q₀) β]                             | [7,] 
@@ -271,7 +285,7 @@ end
                 (Note that the quaternions have been replaced with 3 param)
                     dx/dx = [dϕ/dϕ; dϕ/dβ; ...]                             
 """
-function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate_magnetometer::Bool = true) where {T}
+function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate::Bool = true) where {T}
 
     function nextq(q, ω, β, dt) 
         
@@ -312,11 +326,11 @@ function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate
     A[4:6, 4:6] .= I(3)
 
     
-    if calibrate_magnetometer
+    if calibrate
         # Add in additional states if calibrating (i.e., x = [q, β, C, α, ϵ])
-        Ac = zeros(T, 15, 15)  # Ac = [A  0; 0 I]
+        Ac = zeros(T, 15 + 3 * N, 15 + 3 * N)  # Ac = [A  0; 0 I]
         Ac[1:6, 1:6] .= A 
-        Ac[7:end, 7:end] .= I(9)
+        Ac[7:end, 7:end] .= I(9 + 3 * N)
         
         return x⁺, Ac
     else
@@ -326,7 +340,7 @@ end;
 # """
 
 
-""" mag_measurement(x, Bᴵ, N; calibrate_magnetometer)
+""" mag_measurement(x, Bᴵ, N; calibrate)
 
       Generates what we would expect our measured magnetic field vector would be in the body frame 
     given our current estimated attitude
@@ -341,7 +355,7 @@ end;
       - `H`: Jacobian of mag_measurement with respect to x               |  [3 x 6 (+ 3i)]
                     dy/dx = [dy/dϕ; dy/dβ; ...]                             
 """
-function mag_measurement(x::SAT_STATE{T}, mag::MAGNETOMETER{T}, Bᴵ::SVector{3, T}, N::Int; calibrate_magnetometer::Bool = true) where {T}
+function mag_measurement(x::SAT_STATE{T}, mag::MAGNETOMETER{T}, Bᴵ::SVector{3, T}, N::Int; calibrate::Bool = true) where {T}
 
     ## Generate expected measurements
     Bᴮ = quat2rot(x.q)' * Bᴵ;  # Transpose to convert from inertial → body
@@ -358,13 +372,13 @@ function mag_measurement(x::SAT_STATE{T}, mag::MAGNETOMETER{T}, Bᴵ::SVector{3,
     ∂ϕ = hat(Bᴮ)  
     ∂βᵧ = zeros(3, 3)
 
-    H = (calibrate_magnetometer) ? zeros(T, 3, 15) :  # Jacobian Matrix  H = [∂θ ∂β ∂s ∂ζ ∂βₘ]
-                                   zeros(T, 3, 6)     # Jacobian Matrix  H = [∂θ ∂β] 
+    H = (calibrate) ? zeros(T, 3, 15 + 3 * N) :  # Jacobian Matrix  H = [∂θ ∂β ∂s ∂ζ ∂βₘ ∂C ∂α ∂ϵ]
+                      zeros(T, 3, 6)             # Jacobian Matrix  H = [∂θ ∂β] 
 
     H[:, 1:3] .= ∂ϕ 
     H[:, 4:6] .= ∂βᵧ
 
-    if calibrate_magnetometer
+    if calibrate
         ∂s = Diagonal([ Bᴮ[1],  
                         Bᴮ[1] * sin(ρ) + Bᴮ[2] * cos(ρ), 
                         Bᴮ[1] * sin(λ) + Bᴮ[2] * cos(λ) * sin(ν) + Bᴮ[3] * cos(λ) * cos(ν)])
@@ -378,13 +392,14 @@ function mag_measurement(x::SAT_STATE{T}, mag::MAGNETOMETER{T}, Bᴵ::SVector{3,
         H[:, 7:9]   .= ∂s 
         H[:, 10:12] .= ∂ζ
         H[:, 13:15] .= ∂βₘ
+        # Remainder are all zero
     end
 
 
     return B̃ᴮ, H
 end;
 
-""" current_measurement(x, diodes, sᴵ, pos, alb; E_am₀, use_albedo, calibrate_magnetometer)
+""" current_measurement(x, diodes, sᴵ, pos, alb; E_am₀, use_albedo, calibrate)
 
       Generates what we would expect our measured current values to be given our estimate of state. 
     Earth's albedo can be included, and the state is augmented when the diodes are being calibrated. 
@@ -398,7 +413,7 @@ end;
 
         - `E_am₀`:  (Opt) Irradiance of sunlight (TSI - visible & infrared). Default is 1366.0 W/m²   |  Scalar
         - `use_albedo`: (Opt) Whether or not to include the Earth's albedo. Default is true           |  Bool
-        - `calibrate_magnetometer`: (Opt) Whether or not to calibrate the diodes too. Default is true       |  Bool
+        - `calibrate`: (Opt) Whether or not to calibrate the diodes too. Default is true       |  Bool
 
     Returns:
         - Is: Current measurements corresponding to sᴵ & q (non-negative)   |  [i,]
@@ -406,7 +421,7 @@ end;
                     dy/dx = [dy/dϕ; dy/dβ; ...]                             
 """
 function current_measurement(x::SAT_STATE{T}, diodes::DIODES{N, T}, sᴵ::SVector{3, T}, pos::SVector{3, T}, alb::ALBEDO; 
-                                E_am₀ = 1366.9, use_albedo = true, calibrate_magnetometer::Bool = true) where {N, T}
+                                E_am₀ = 1366.9, use_albedo = true, calibrate::Bool = true) where {N, T}
     # SUN INERTIAL is UNSCALED NOW!!
     C, α, ϵ = diodes.calib_values, diodes.azi_angles, diodes.elev_angles
 
@@ -437,10 +452,22 @@ function current_measurement(x::SAT_STATE{T}, diodes::DIODES{N, T}, sᴵ::SVecto
     ∂β = zeros(T, N, 3)    # How slight changes in gyro bias affect expected current field (∂I/∂β)
     
 
-    # H = [∂θ ∂β ∂C ∂α ∂ϵ]  :  [∂θ ∂β]
-    H = (calibrate_magnetometer) ? zeros(T, 6, 15)  : zeros(T, 6, 6)  
+    # H = [∂θ ∂β ∂s ∂ζ ∂βₘ ∂C ∂α ∂ϵ]  :  [∂θ ∂β]
+    H = (calibrate) ? zeros(T, 6, 15 + 3 * N)  : zeros(T, 6, 6)  
     H[:, 1:3] .= ∂θ
     H[:, 4:6] .= ∂β    # Should be just zeros...
+
+    if calibrate
+        # Jacobian Matrix   H = [∂θ ∂β ∂s ∂ζ ∂βₘ ∂C ∂α ∂ϵ]
+        ndα = [(-cos.(ϵ).*sin.(α)) ( cos.(ϵ).*cos.(α)) zeros(size(α))];
+        ndϵ = [(-sin.(ϵ).*cos.(α)) (-sin.(ϵ).*sin.(α)) cos.(ϵ)]; # (With negative middle term, differing from the paper)
+        
+        ∂C = n * sᴮ;            # [i,]
+        ∂α = C .* (ndα * sᴮ);   # [i,]
+        ∂ϵ = C .* (ndϵ * sᴮ);   # [i,]  
+        
+        H[:, 16:end] .= [Diagonal(∂C) Diagonal(∂α) Diagonal(∂ϵ)]
+    end
 
     Is[Is .< 1e-8]   .= 0.0   # Photodiodes don't generate negative current
     H[Is .≤  0.0, :] .= 0.0   #   ^ to match the above 
@@ -449,12 +476,12 @@ function current_measurement(x::SAT_STATE{T}, diodes::DIODES{N, T}, sᴵ::SVecto
 end;
 
 
-""" update(x, diodes, L, z; calibrate_magnetometer)
+""" update(x, diodes, L, z; calibrate)
 
       Uses the Kalman gain and innovation vector to update the estimates for the satellite
     state, and potentially the calibration factors too. 
 """
-function update(x::SAT_STATE{T}, mag::MAGNETOMETER{T}, L::Matrix{T}, z::SVector{N₂, T}; calibrate_magnetometer::Bool = true) where {N, N₂, T}
+function update(x::SAT_STATE{T}, mag::MAGNETOMETER{T}, diodes::DIODES{N, T}, L::Matrix{T}, z::SVector{N₂, T}; calibrate::Bool = true) where {N, N₂, T}
     
     δx = L * z 
 
@@ -470,14 +497,37 @@ function update(x::SAT_STATE{T}, mag::MAGNETOMETER{T}, L::Matrix{T}, z::SVector{
     β⁺ = x.β + δx[4:6]
     
     # Update the calibration states if desired
-    s⁺  = (calibrate_magnetometer) ? (mag.scale_factors + δx[7:9]) : mag.scale_factors
-    ζ⁺  = (calibrate_magnetometer) ? (mag.non_ortho_angles + δx[10:12]) : mag.non_ortho_angles
-    βₘ⁺ = (calibrate_magnetometer) ? (mag.bias + δx[13:15]) : mag.bias
+    s⁺  = (calibrate) ? (mag.scale_factors + δx[7:9])      : mag.scale_factors
+    ζ⁺  = (calibrate) ? (mag.non_ortho_angles + δx[10:12]) : mag.non_ortho_angles
+    βₘ⁺ = (calibrate) ? (mag.bias + δx[13:15])             : mag.bias
+
+    # #### SKETCHY 
+    # if s⁺[2] < 0.0 
+    #     @infiltrate
+    #     s⁺ = s⁺ .* SVector{3, Float64}(1.0, -1.0, 1.0)  # b
+    #     ζ⁺ = ζ⁺ .+ SVector{3, Float64}(π, 0.0, 0.0)     # ρ
+    # elseif s⁺[3] < 0.0
+    #     @infiltrate 
+    #     s⁺ = s⁺ .* SVector{3, Float64}(1.0, 1.0, -1.0)  # c
+    #     ζ⁺ = ζ⁺ .+ SVector{3, Float64}(0.0, π, 0.0)     # ρ
+    # end
+    ζ⁺  = atan.(sin.(ζ⁺), cos.(ζ⁺))      # Wrap to (-π, π]
+
+    i₀ = 16; i₁ = i₀ + N - 1
+    C⁺ = (calibrate) ? (diodes.calib_values + δx[i₀:i₁]) : diodes.calib_values
+
+    i₀ = i₁ + 1; i₁ = i₀ + N - 1
+    α⁺ = (calibrate) ? (diodes.azi_angles  +  δx[i₀:i₁]) : diodes.azi_angles
+
+    i₀ = i₁ + 1; i₁ = i₀ + N - 1
+    ϵ⁺ = (calibrate) ? (diodes.elev_angles +  δx[i₀:i₁]) : diodes.elev_angles 
+
 
     x⁺ = SAT_STATE(q⁺, β⁺)
     mag⁺ = MAGNETOMETER(s⁺, ζ⁺, βₘ⁺)
+    diodes⁺ = DIODES(C⁺, α⁺, ϵ⁺)
 
-    return x⁺, mag⁺
+    return x⁺, mag⁺, diodes⁺
 end
 
 

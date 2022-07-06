@@ -166,11 +166,16 @@ end;
 detumbler_report(results; kwargs...) = detumbler_report(results[:states], results[:sensors]; kwargs...)
 
 function evaluate_diode_cal(sensors::Vector{SENSORS{6, T}}, truths::Vector{GROUND_TRUTH{6, T}}, d0::DIODES, df::DIODES; verbose = true) where {T}
+
+    no_eclipse = [norm(sensors[i].diodes) > 0.02 for i = 1:size(sensors, 1)]
+    sensors = sensors[ no_eclipse ]; # Ignore eclipse
+    truths  = truths[  no_eclipse ]; 
+
     N = size(truths, 1)
 
-    ŝ0 = [estimate_sun_vector(sensors[i], d0) for i = 1:N]
-    ŝf = [estimate_sun_vector(sensors[i], df) for i = 1:N]
-    sᴮ = [truths[i].ŝᴮ for i = 1:N]
+    ŝ0 = [estimate_sun_vector(sensors[i], d0) for i = 1:N];
+    ŝf = [estimate_sun_vector(sensors[i], df) for i = 1:N];
+    sᴮ = [truths[i].ŝᴮ for i = 1:N];
 
     e0 = [ rad2deg( acos(ŝ0[i]' * sᴮ[i])) for i = 1:N]
     ef = [ rad2deg( acos(ŝf[i]' * sᴮ[i])) for i = 1:N]

@@ -55,7 +55,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
         x₀, T_orbit = get_initial_state(; detumbled = true)
         flags = FLAGS(; init_detumble = true)
         sat_truth = SATELLITE(; sta =  SAT_STATE(; q = x₀.q, β = x₀.β))
-        sat_est   = SATELLITE(; J = sat_truth.J, sta = SAT_STATE(; ideal = true), mag = MAGNETOMETER(; ideal = true), dio = sat_truth.diodes)
+        sat_est   = SATELLITE(; J = sat_truth.J, sta = SAT_STATE(; ideal = true), mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true))
 
         op_mode   = detumble  # Will switch over after first iteration
 
@@ -253,10 +253,10 @@ end;
 
 
 # @info "No Noise!"; results = main(; num_orbits = 1.0, initial_mode = mag_cal, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
-Random.seed!(1001)
-# @info "Partial Noise!"; results = main(; num_orbits = 2.0, initial_mode = mag_cal, σB = deg2rad(0.1), σ_gyro = 1e-2, σr = 1e3, σ_current = 0.01);
+# @info "Partial Noise!"; results = main(; num_orbits = 1.25, initial_mode = mag_cal, σB = deg2rad(0.00), σ_current = 0.00);
 @info "Full Noise!"; results = main(; num_orbits = 2.0, initial_mode = mag_cal); 
-# sat_truth, sat_est, truths, sensors, ecls, noises, states, sat_ests, op_modes 
+# sat_truth, sat_est, truths, sensors, dioecls, noises, states, sat_ests, op_modes 
+
 
 # display(plot(results[:states]))
 # display(plot(results[:sensors]))

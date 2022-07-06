@@ -95,7 +95,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             else
                 next_mode = mekf 
                 data = MEKF_DATA()
-                q = run_triad(sensors, sat_est, t, flags.in_sun)  # x.q
+                q = run_triad(sensors, sat_est, t, flags.in_sun; sᴮ_true = truth.ŝᴮ)  # x.q
                 reset_cov!(sat_est; reset_calibration = false)
                 sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
             end
@@ -106,7 +106,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             if !(flags.in_sun)
                 next_mode = chill
             else
-                q = run_triad(sensors, sat_est, t, flags.in_sun)  # x.q 
+                q = run_triad(sensors, sat_est, t, flags.in_sun; sᴮ_true = truth.ŝᴮ)  # x.q 
                 sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
                 next_mode = mag_cal 
                 # Bᴵ_pred = IGRF13(sensors.pos, t)
@@ -140,7 +140,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             if !(flags.in_sun)
                 next_mode = chill 
             else 
-                sat_est = Estimator.estimate(sat_est, sensors, data, alb, t, dt; use_albedo = use_albedo, calibrate_magnetometer = true)
+                sat_est = Estimator.estimate(sat_est, sensors, data, alb, t, dt; use_albedo = use_albedo, calibrate = true)
 
                 # Check if covariance of calibration states is low enough to fix
                 if norm(sat_est.covariance[7:end, 7:end]) < 0.1 * calib_cov_thres 
@@ -165,7 +165,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             next_mode = mag_cal # diode_cal 
 
             data = MEKF_DATA()
-            q = run_triad(sensors, sat_est, t, flags.in_sun)  # x.q 
+            q = run_triad(sensors, sat_est, t, flags.in_sun; sᴮ_true = truth.ŝᴮ)  # x.q 
             reset_cov!(sat_est; reset_calibration = true)
             sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
 
@@ -266,12 +266,12 @@ end
       - `q`:  Estimate of satellite attitude
 
 """
-function run_triad(sensors::SENSORS{N, T}, sat_est::SATELLITE, t::Epoch, in_sun::Bool = true) where {N, T}
+function run_triad(sensors::SENSORS{N, T}, sat_est::SATELLITE, t::Epoch, in_sun::Bool = true; sᴮ_true = nothing) where {N, T}
     (!in_sun) && @warn "run_triad should never be called if not in the sun!"
 
     sᴵ_est = sun_position(t) - sensors.pos     # Estimated sun vector 
     Bᴵ_est = IGRF13(sensors.pos, t)            # Estimated magnetic field vector
-    ŝᴮ = estimate_sun_vector(sensors, sat_est.diodes)
+    ŝᴮ = estimate_sun_vector(sensors, sat_est.diodes; sᴮ_true = sᴮ_true)
     Bᴮ = sensors.magnetometer
 
     q, _ = triad(sᴵ_est, Bᴵ_est, ŝᴮ, Bᴮ)  # Write this function here too? 
@@ -322,7 +322,21 @@ end
 # The Pseudo-inv method would probably be sketchy IRL because when the sun isn't illuminating 3+ diodes it would fail
 # This method does not rely on knowledge of photodiode setup in advance
 # Also, even with perfect estimates for the diode parameters this still gets ~2* error
-function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
+function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}; sᴮ_true = nothing) where {N, T}
+    Ĩ = sens.diodes ./ diodes.calib_values 
+
+    if false #size( Ĩ[abs.(Ĩ) .> 0.1], 1) < 3  # Less than three diodes are illuminated 
+        @infiltrate
+        return estimate_sun_vector2(sens, diodes)
+    else
+        return estimate_sun_vector_pinv(sens, diodes)
+    end
+
+end
+
+
+
+function estimate_sun_vector_pinv(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
     n(α, ϵ) = [sin(pi/2 - ϵ)*cos(α); sin(pi/2 - ϵ) * sin(α); cos(pi/2 - ϵ)]
 
     Ĩ    = sens.diodes ./ diodes.calib_values 
@@ -335,6 +349,12 @@ function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N
     end 
 
     ŝ = (ns' * ns) \ (ns' * Ĩ)
+
+    # REMOVE! 
+    # if size(Ĩ[Ĩ .> 0.1], 1) < 3
+    #     @infiltrate
+    # end
+
     return ŝ / norm(ŝ)
 end
 
