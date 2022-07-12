@@ -158,7 +158,27 @@ end
 end
 
 @testset "Estimate Sun Vector" begin 
+    # Deal with numerical errors 
+    r_acos(x) = (x ≈  1) ? zero(x)    : 
+                (x ≈ -1) ? one(x) * π : acos(x)
 
+    for i = 1:50
+        sat = SATELLITE();
+        alb = get_albedo(2);
+        x, _ = get_initial_state();
+        t   = Epoch(2020, 1, 1) + (60 * 60 * 24) + rand(1:365);
+        sᴵ, sᴮ, ecl = Simulator.sun_measurement(x, quat2rot(x.q)', t);
+        if ecl > 0.5
+            Is, Ĩs, ηs  = Simulator.diode_measurement(sat, alb, x, ecl, sᴵ, sᴮ; σ_scale = 0.0, use_albedo = false)
+            
+            if size(Is[Is .> 0.05], 1) ≥ 3
+
+                sensors = SENSORS(SVector{3, Float64}(zeros(3)), Ĩs, SVector{3, Float64}(zeros(3)), SVector{3, Float64}(zeros(3)))
+                ŝᴮ  = estimate_sun_vector(sensors, sat.diodes)
+                @test rad2deg(r_acos(sᴮ' * ŝᴮ)) < 1e-6
+            end
+        end
+    end
 end
 
 @testset "Correct Magnetometer" begin

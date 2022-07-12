@@ -13,7 +13,7 @@
 """
 
 
-# If these change, change the state_machine defaults as well.
+# If these change, change the state_machine defaults and MEKF DATA defaults as well.
 # Magnetometer noise is composed using a rotation, as opposed to the additive method used in On-Orbit Calibration..., but I ran some tests and 
 # estimated that their angular distance corresponds to a 0.25deg rotation.
 """
@@ -49,7 +49,7 @@
 
 """
 function generate_measurements(sat::SATELLITE, alb::ALBEDO, x::STATE, t::Epoch, dt::T; 
-                                E_am₀ = 1366.9, σB = deg2rad(0.25), σ_gyro = 5e-2, 
+                                E_am₀ = 1366.9, σB = deg2rad(0.25), σ_gyro = 5e-4, 
                                 σr = 5e3, σ_current = 0.05, use_albedo = true) where {T}
 
     ᴮQᴵ = quat2rot(x.q)'  # Compute once and pass in 
@@ -68,7 +68,6 @@ function generate_measurements(sat::SATELLITE, alb::ALBEDO, x::STATE, t::Epoch, 
 
     return truth, sensors, ecl, noise
 end
-
 
 
 # I have noise as a rotation, the paper has it as additive with σ = 1e-9 T, which seems to only do 0.25 deg of rotation
@@ -240,7 +239,7 @@ function diode_measurement(sat::SATELLITE{N, T}, alb::ALBEDO, x::STATE{T}, ecl::
             Ĩ[i] = (current + η < 1e-8) ? 0.0 : (current + η) 
             ηI[i] = η 
         end
-
+      
         return SVector{N, T}(I), SVector{N, T}(Ĩ), SVector{N, T}(ηI)
     end
 end 
