@@ -40,7 +40,7 @@ struct SAT_COVARIANCE{T}
     end
 
     ## Not sure if noise is right!
-    function SAT_COVARIANCE(; σϕ = deg2rad(10), σβᵧ = deg2rad(10), σs = 0.25, σζ = deg2rad(5), σβₘ = 2.5, σC = 0.15, σα = deg2rad(5.0), σϵ = deg2rad(5.0), N = 6)  
+    function SAT_COVARIANCE(; σϕ = deg2rad(8.0), σβᵧ = 0.05, σs = 0.1, σζ = deg2rad(3.0), σβₘ = 1.0, σC = 0.125, σα = deg2rad(3.0), σϵ = deg2rad(3.0), N = 6)
         """ random """
         Σϕ  = diagm( (σϕ^2) * ones(3) )
         Σβᵧ = diagm( (σβᵧ^2) * ones(3) )

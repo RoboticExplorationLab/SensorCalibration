@@ -70,8 +70,8 @@ struct DIODES{S, T}
             # aa = [0.0,  pi, pi/2, -pi/2,  0.0,   0.0]
             # ea = [0.0, 0.0,  0.0,   0.0, pi/2, -pi/2]
 
-            ea = ea + rand(Normal(0.0, deg2rad(5.0)), N)   # On-Orbit paper has 10 or 2 deg
-            aa = aa + rand(Normal(0.0, deg2rad(5.0)), N)
+            ea = ea + rand(Normal(0.0, deg2rad(3.0)), N)   # On-Orbit paper has 10 or 2 deg
+            aa = aa + rand(Normal(0.0, deg2rad(3.0)), N)
         else
             ea = deg2rad.(rand(-90:90, N))
             aa = deg2rad.(rand(-179:180, N))
