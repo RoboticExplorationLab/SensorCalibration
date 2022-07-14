@@ -11,7 +11,8 @@ using Infiltrator, Test
 
 using StaticArrays, SatelliteDynamics, EarthAlbedo 
 using Distributions, LinearAlgebra, Plots, JLD2, Random
-using ProgressMeter
+using ProgressMeter, PrettyTables
+
 
 using Logging; logger = SimpleLogger(stdout, Logging.Debug);
 
@@ -56,7 +57,6 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
         flags = FLAGS(; init_detumble = true)
         sat_truth = SATELLITE(; sta =  SAT_STATE(; q = x₀.q, β = x₀.β))
         sat_est   = SATELLITE(; J = sat_truth.J, sta = SAT_STATE(; ideal = true), mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true))
-
         op_mode   = detumble  # Will switch over after first iteration
 
     elseif initial_mode == diode_cal
@@ -105,7 +105,6 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
     for i = 1:ℓ
         prev_mode = op_mode
             
-        ########################## add in noise args here
         # Step
         sat_truth, sat_est, x, t, op_mode, data, truth, sensor, ecl, noise  = step(sat_truth, sat_est, alb, x, t, 
                                                                         dt, op_mode, flags, i, progress_bar, T_orbit, data; 
@@ -183,7 +182,7 @@ function get_initial_state(; _Re = 6378136.3, detumbled = false, bias_less = fal
     ω₀ = SVector{3, Float64}(ω₀ .* sign.(randn(3)))
     
     # ω₀ = (detumbled) ? SVector{3, Float64}(0.07 * randn(3)) : SVector{3, Float64}(0.4 * randn(3))
-    β₀ = (bias_less) ? SVector{3, Float64}(0.0, 0.0, 0.0)  : SVector{3, Float64}(rand(Normal(0.0, deg2rad(2)), 3)) # Initial guess can be a bit off
+    β₀ = (bias_less) ? SVector{3, Float64}(0.0, 0.0, 0.0)  : SVector{3, Float64}(rand(Normal(0.0, 0.05), 3)) # Initial guess can be a bit off
     
     T_orbit = orbit_period(oe0[1])
     x = STATE(r₀, v₀, q₀, ω₀, β₀)
@@ -245,22 +244,26 @@ end;
 
 
 
-
-
 # with_logger(logger) do 
-#     global temp = main(; num_orbits = 0.5, initial_mode = diode_cal)
+#     global results = main(; num_orbits = 0.5, initial_mode = diode_cal)
 # end
 
-
-# @info "No Noise!"; results = main(; num_orbits = 1.0, initial_mode = mag_cal, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
+# @info "No Noise!"; results = main(; num_orbits = 1.25, initial_mode = mag_cal, use_albedo = false, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
 # @info "Partial Noise!"; results = main(; num_orbits = 1.25, initial_mode = mag_cal, σB = deg2rad(0.00), σ_current = 0.00);
-@info "Full Noise!"; results = main(; num_orbits = 2.0, initial_mode = mag_cal); 
+# @info "Full Noise!"; results = main(; initial_mode = mag_cal, num_orbits = 0.25, use_albedo = false); # initial_mode = mag_cal, use_albedo = false); 
 # sat_truth, sat_est, truths, sensors, dioecls, noises, states, sat_ests, op_modes 
+
+# diode_calibration_report(results)
+# diode_self_consistency(results)
+# mag_self_consistency(results)
 
 
 # display(plot(results[:states]))
 # display(plot(results[:sensors]))
 # diode_calibration_report(results)
 # mekf_report(results)
+
+eqs, ess, eBs, es₀s, eB₀s = monte_carlo(15);
+
 
 println("Done!")

@@ -39,7 +39,7 @@ function magnetometer_calibration_report(sat_true::SATELLITE, est_hist::Vector{S
     println("     βz    |   $βz\t|    $βzᶠ \t|    $βz₀       | ", abs(βz - βzᶠ) < abs(βz - βz₀) ? "    Yes!" : "   No!")
     println("__________________________________________________________________________")
 
-    s_off, ζ_off, β_off = 0.25, 5, 0.25
+    s_off, ζ_off, β_off = 0.2, 6, 2.0  # 2σ
     ##### PLOT ##### 
     ap = plot(s_est[1, :], title = "Scale Factor a", label = false); ap = hline!([a₀], ls = :dot, label = false); ap = hline!([a], ls = :dash, label = false, ylim = [a - s_off, a + s_off]);
     bp = plot(s_est[2, :], title = "Scale Factor b", label = false); bp = hline!([b₀], ls = :dot, label = false); bp = hline!([b], ls = :dash, label = false, ylim = [b - s_off, b + s_off]);
@@ -90,7 +90,7 @@ function diode_calibration_report(sat_true::SATELLITE, est_hist::Vector{SATELLIT
     
 
     ##### PLOT #####
-    C_off, ϵ_off, α_off = 0.2, 6.0, 6.0
+    C_off, ϵ_off, α_off = 0.25, 6.0, 6.0
     Cps, ϵps, αps = [], [], []
     for i = 1:6
         plot(C_est[i, :], title = "Scale Factor (C)", label = false); 
@@ -166,8 +166,13 @@ end;
 detumbler_report(results; kwargs...) = detumbler_report(results[:states], results[:sensors]; kwargs...)
 
 function evaluate_diode_cal(sensors::Vector{SENSORS{6, T}}, truths::Vector{GROUND_TRUTH{6, T}}, d0::DIODES, df::DIODES; verbose = true) where {T}
+    # Deal with numerical errors 
+    r_acos(x) = (x ≈  1) ? zero(x)    : 
+                (x ≈ -1) ? one(x) * π : acos(x)
 
     no_eclipse = [norm(sensors[i].diodes) > 0.02 for i = 1:size(sensors, 1)]
+    
+    
     sensors = sensors[ no_eclipse ]; # Ignore eclipse
     truths  = truths[  no_eclipse ]; 
 
@@ -177,8 +182,8 @@ function evaluate_diode_cal(sensors::Vector{SENSORS{6, T}}, truths::Vector{GROUN
     ŝf = [estimate_sun_vector(sensors[i], df) for i = 1:N];
     sᴮ = [truths[i].ŝᴮ for i = 1:N];
 
-    e0 = [ rad2deg( acos(ŝ0[i]' * sᴮ[i])) for i = 1:N]
-    ef = [ rad2deg( acos(ŝf[i]' * sᴮ[i])) for i = 1:N]
+    e0 = [ rad2deg( r_acos(ŝ0[i]' * sᴮ[i])) for i = 1:N]
+    ef = [ rad2deg( r_acos(ŝf[i]' * sᴮ[i])) for i = 1:N]
     # e0 = [norm(sᴮ[i] - ŝ0[i]) for i = 1:N]
     # ef = [norm(sᴮ[i] - ŝf[i]) for i = 1:N]
 
@@ -261,7 +266,7 @@ function monte_carlo(N = 10)
     for i = 1:N
         println("\n---------  $i --------")
         # results = main(; verbose = false, num_orbits = 1.5, initial_state = diode_cal, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0);
-        results = main(; verbose = false)
+        results = main(; initial_mode = mag_cal, num_orbits = 1.25, verbose = false, use_albedo = false)
         eq = mekf_report(results; verbose = false)
         es₀, es = evaluate_diode_cal(results; verbose = false)
         eB₀, eB = evaluate_mag_cal(results; verbose = false)
@@ -272,5 +277,207 @@ function monte_carlo(N = 10)
         eB₀s[i] = eB₀
     end
 
+    sDiff = (ess - es₀s);
+    bDiff = (eBs - eB₀s);
+    μsf, σsf = round(mean(ess), digits = 2),   round(std(ess), digits = 2);
+    μs0, σs0 = round(mean(es₀s), digits = 2),  round(std(es₀s), digits = 2);
+    μsd, σsd = round(mean(sDiff), digits = 2), round(std(sDiff), digits = 2);
+    μbf, σbf = round(mean(eBs), digits = 2),   round(std(eBs), digits = 2);
+    μb0, σb0 = round(mean(eB₀s), digits = 2),  round(std(eB₀s), digits = 2);
+    μbd, σbd = round(mean(bDiff), digits = 2), round(std(bDiff), digits = 2);
+    μϕ, σϕ   = round(mean(eqs), digits = 2), round(std(eqs), digits = 2);
+
+    header  = (["Vector", "Initial", "Final", "Difference (fin - init)"], ["N = $N", "μ° (σ°)", "μ° (σ°)", "μ (σ)"]);
+    vectors = ["Sun", "Mag", "Attitude"];
+    inits   = ["$μs0 ($σs0)", "$μb0 ($σb0)", "-----"];
+    finals  = ["$μsf ($σsf)", "$μbf ($σbf)", "$μϕ ($σϕ)"];
+    diffs   = ["$μsd ($σsd)", "$μbd ($σbd)", "-----"];
+    data    = hcat(vectors, inits, finals, diffs);
+    display(pretty_table(data; header = header, header_crayon = crayon"yellow bold"));
+
     return eqs, ess, eBs, es₀s, eB₀s
 end
+
+
+
+# NOTE that we are using a sqrt KF, so ``Covariance'' is already a stdev 
+function mag_self_consistency(results, t::Symbol = :a; start = 1, stop = nothing, ds = 1, kwargs...)
+    sat_true, est_hist = results[:sat_truth], results[:sat_ests];
+    N = size(est_hist, 1)
+
+    function wrap(diff; radians = true)
+
+        offset = (radians) ? pi : 180
+        while diff > offset 
+            diff -= 2 * offset 
+        end
+
+        while diff < -offset 
+            diff += 2 * offset 
+        end
+
+        return diff
+    end
+
+    s_err, ζ_err, β_err = zeros(N, 3), zeros(N, 3), zeros(N, 3);
+    σs, σζ, σβ = zeros(N, 3), zeros(N, 3), zeros(N, 3);
+
+    a, b, c    = sat_true.magnetometer.scale_factors;
+    ρ, λ, ν    = sat_true.magnetometer.non_ortho_angles;
+    βx, βy, βz = sat_true.magnetometer.bias;
+    
+    for i = 1:N
+        s_err[i, :] = [a, b, c] .- est_hist[i].magnetometer.scale_factors
+        ζ_err[i, :] = wrap.([ρ, λ, ν] .- est_hist[i].magnetometer.non_ortho_angles)
+        β_err[i, :] = [βx, βy, βz] .- est_hist[i].magnetometer.bias
+
+        Σchol = est_hist[i].covariance 
+        Σ = Σchol' * Σchol 
+        σs[i, :] .= sqrt.(diag(Σ[7:9, 7:9]))
+        σζ[i, :] .= sqrt.(diag(Σ[10:12, 10:12]))
+        σβ[i, :] .= sqrt.(diag(Σ[13:15, 13:15]))
+
+        # σs[i, :] = ([est_hist[i].covariance[7,   7], est_hist[i].covariance[8,   8], est_hist[i].covariance[9,   9]])
+        # σζ[i, :] = ([est_hist[i].covariance[10, 10], est_hist[i].covariance[11, 11], est_hist[i].covariance[12, 12]])
+        # σβ[i, :] = ([est_hist[i].covariance[13, 13], est_hist[i].covariance[14, 14], est_hist[i].covariance[15, 15]])
+    end
+
+    plot(s_err, title = "Error - Scale Factors", label = ["a" "b" "c"], xlabel = "Index", ylabel = "Value", layout = 3);
+    plot!(      3 * σs, c = :red, layout = 3, label = "3σ");
+    ps = plot!(-3 * σs, c = :red, layout = 3, label = false)
+
+    plot(rad2deg.(ζ_err), title = "Error - Non-Ortho Angles", label = ["ρ" "λ" "ν"], xlabel = "Index", ylabel = "Value", layout = 3);
+    plot!(      3 * rad2deg.(σζ), c = :red, layout = 3, label = "3σ");
+    pζ = plot!(-3 * rad2deg.(σζ), c = :red, layout = 3, label = false)
+
+    plot(β_err, title = "Error - Bias", label = ["x" "y" "z"], xlabel = "Index", ylabel = "Value", layout = 3);
+    plot!(      3 * σβ, c = :red, layout = 3, label = "3σ");
+    pβ = plot!(-3 * σβ, c = :red, layout = 3, label = false)
+
+    display(plot(ps))
+    display(plot(pζ))
+    display(plot(pβ))
+
+    return nothing
+end
+
+function diode_self_consistency(results, t::Symbol = :a; start = 1, stop = nothing, ds = 1, kwargs...)
+    sat_true, est_hist = results[:sat_truth], results[:sat_ests];
+    N = size(est_hist, 1)
+    Nd = 6
+
+    function wrap(diff; radians = true)
+
+        offset = (radians) ? pi : 180
+        while diff > offset 
+            diff -= 2 * offset 
+        end
+
+        while diff < -offset 
+            diff += 2 * offset 
+        end
+
+        return diff
+    end
+
+    
+    C_err, α_err, ϵ_err = zeros(N, Nd), zeros(N, Nd), zeros(N, Nd);
+    σC, σα, σϵ = zeros(N, Nd), zeros(N, Nd), zeros(N, Nd);
+    Cs, αs, ϵs = sat_true.diodes.calib_values, sat_true.diodes.azi_angles, sat_true.diodes.elev_angles;
+
+    for i = 1:N
+        C_err[i, :] .= Cs .- est_hist[i].diodes.calib_values;
+        α_err[i, :] .= wrap.( αs - est_hist[i].diodes.azi_angles);
+        ϵ_err[i, :] .= wrap.( ϵs - est_hist[i].diodes.elev_angles);
+
+        # NO sqrt. because it is already a square root KF (but keep abs)
+        Σchol = est_hist[i].covariance 
+        Σ = Σchol' * Σchol 
+
+        σC[i, :] .= sqrt.(diag(Σ[16:21, 16:21]))  # abs.(diag(est_hist[i].covariance[16:21, 16:21]));
+        σα[i, :] .= sqrt.(diag(Σ[22:27, 22:27]))  #abs.(diag(est_hist[i].covariance[22:27, 22:27]));
+        σϵ[i, :] .= sqrt.(diag(Σ[28:33, 28:33]))  #abs.(diag(est_hist[i].covariance[28:33, 28:33]));
+    end
+
+    plot(C_err, title = "Error - Scale Factors", xlabel = "Index", ylabel = "Value", layout = 6);
+    plot!(      3 * σC, c = :red, layout = 6, label = "3σ");
+    pC = plot!(-3 * σC, c = :red, layout = 6, label = false)
+
+    plot(rad2deg.(α_err), title = "Error - Azimuth Angles",   xlabel = "Index", ylabel = "Value", layout = 6);
+    plot!(      3 * rad2deg.(σα), c = :red, layout = 6, label = "3σ");
+    pα = plot!(-3 * rad2deg.(σα), c = :red, layout = 6, label = false)
+
+    plot(rad2deg.(ϵ_err), title = "Error - Elevation Angles", xlabel = "Index", ylabel = "Value", layout = 6);
+    plot!(      3 * rad2deg.(σϵ), c = :red, layout = 6, label = "3σ");
+    pϵ = plot!(-3 * rad2deg.(σϵ), c = :red, layout = 6, label = false)
+
+    display(plot(pC))
+    display(plot(pα))
+    display(plot(pϵ))
+
+    return nothing
+end
+
+function mekf_self_consistency(results)
+    # Deal with numerical errors 
+    r_acos(x) = (x ≈  1) ? zero(x)    : 
+                (x ≈ -1) ? one(x) * π : acos(x)
+
+                
+    x = results[:states]
+    N = size(x, 1)
+    x̂ = results[:sat_ests] # [results[:sat_ests].state for i = 1:N]
+
+    ϕ_err, β_err = zeros(N), zeros(N, 3);
+    σϕ, σβ = zeros(N), zeros(N, 3);
+    vᴮ = normalize([1, 1, 1]);
+    for i = 1:N
+        Q, Q̂ = quat2rot(x[i].q), quat2rot(x̂[i].state.q)
+        ϕ_err[i] = rad2deg(r_acos((Q * vᴮ)' * (Q̂ * vᴮ)))
+        β_err[i, :] .= x[i].β - x̂[i].state.β
+
+        Σchol = x̂[i].covariance
+        Σ = Σchol' * Σchol
+         
+        σϕ[i] = rad2deg(norm(sqrt.(diag(Σ[1:3, 1:3]))))  #  rad2deg(norm(diag(x̂[i].covariance[1:3, 1:3])))
+        σβ[i, :] .= sqrt.(diag(Σ[4:6, 4:6]))  #  abs.(diag(x̂[i].covariance[4:6, 4:6]))
+    end
+
+    plot(ϕ_err, title = "Error - Attitude");
+    plot!(   3 * σϕ);
+    pϕ = plot!(-3 * σϕ)
+
+    plot(β_err, title = "Error - Gyro Bias", layout = 3);
+    plot!(      3 * σβ, c = :red, layout = 3, label = "3 * σ");
+    pβ = plot!(-3 * σβ, c = :red, layout = 3, label = false)
+
+
+
+end
+
+
+
+# # Get stdev of q est 
+# @testset "σϕ" begin
+#     alb = get_albedo(2)
+#     dt  = 0.2
+#     vᴮ  = [1, 1, 1]; vᴮ /= norm(vᴮ)
+#     errs = []
+
+#     for i = 1:15000
+#         t    = Epoch(2020, 1, 1) + (60 * 60 * 24) * rand(1:365)
+#         sat  = SATELLITE()
+#         sat_est = SATELLITE(; ideal = true)
+#         x, _ = get_initial_state()
+
+#         truth, sensors, ecl, noise = generate_measurements(sat, alb, x, t, dt; use_albedo = true);
+#         if ecl > 0.1
+#             q = run_triad(sensors, sat_est, t, true; sᴮ_true = truth.ŝᴮ)  # x.q 
+#             Q̂ = quat2rot(q); Q = quat2rot(x.q)
+#             v̂ᴵ = Q̂ * vᴮ; vᴵ = Q * vᴮ;
+#             er = rad2deg(acos(v̂ᴵ' * vᴵ))
+#             push!(errs, er)
+#         end
+#     end
+# end
+
