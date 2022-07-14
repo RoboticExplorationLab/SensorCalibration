@@ -44,7 +44,7 @@
 """
 function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}, t::Epoch, dt::Real, op_mode::Operation_mode, 
                 flags::FLAGS, idx::Int, progress_bar, T_orbit, data; use_albedo = true, initial_detumble_thresh = deg2rad(15), final_detumble_thresh = deg2rad(8),  # was 25, 10 deg
-                mag_ds_rate = 60, calib_cov_thres = 0.036, mekf_cov_thres = 0.004, σβ = 3.14e-5, σB = deg2rad(0.25), σ_gyro = 0.5e-4, 
+                mag_ds_rate = 60, calib_cov_thres = 0.005, mekf_cov_thres = 0.004, σβ = 3.14e-5, σB = deg2rad(0.25), σ_gyro = 5e-4, 
                 σr = 5e3, σ_current = 0.05 ) where {T}
 
     t += dt   # Update time
@@ -52,7 +52,6 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
     ### Generate measurements
 
     truth, sensors, ecl, noise = generate_measurements(sat_truth, alb, x, t, dt; use_albedo = use_albedo, σB = σB, σ_gyro = σ_gyro, σr = σr, σ_current = σ_current);
-
 
     flags.magnetometer_calibrated && (sensors = correct_magnetometer(sat_est, sensors))  # Correct the magnetometer readings once it has been calibrated 
 
@@ -107,6 +106,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
                 next_mode = chill
             else
                 q = run_triad(sensors, sat_est, t, flags.in_sun; sᴮ_true = truth.ŝᴮ)  # x.q 
+
                 sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
                 next_mode = mag_cal 
                 # Bᴵ_pred = IGRF13(sensors.pos, t)
@@ -143,7 +143,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
                 sat_est = Estimator.estimate(sat_est, sensors, data, alb, t, dt; use_albedo = use_albedo, calibrate = true)
 
                 # Check if covariance of calibration states is low enough to fix
-                if norm(sat_est.covariance[7:end, 7:end]) < 0.1 * calib_cov_thres 
+                if norm(sat_est.covariance[7:end, 7:end]) < calib_cov_thres 
                     next_mode = finished # detumble 
                     flags.diodes_calibrated = true 
                 end
@@ -319,25 +319,33 @@ function triad(r₁ᴵ,r₂ᴵ,r₁ᴮ,r₂ᴮ)
 end
 
 
+@warn "Estimate Sun Vec does NOT subtract out Albedo first" # (``correct'' diode readings? Make sure it is uncorrected where necessary) 
+
 # The Pseudo-inv method would probably be sketchy IRL because when the sun isn't illuminating 3+ diodes it would fail
 # This method does not rely on knowledge of photodiode setup in advance
 # Also, even with perfect estimates for the diode parameters this still gets ~2* error
 function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}; sᴮ_true = nothing) where {N, T}
-    Ĩ = sens.diodes ./ diodes.calib_values 
-
-    if false #size( Ĩ[abs.(Ĩ) .> 0.1], 1) < 3  # Less than three diodes are illuminated 
-        @infiltrate
-        return estimate_sun_vector2(sens, diodes)
-    else
-        return estimate_sun_vector_pinv(sens, diodes)
+    
+    try 
+        ŝ = estimate_sun(sens, diodes)
+        return ŝ
+    catch 
+        ŝ = estimate_sun_vector_pinv(sens, diodes)
+        return ŝ
     end
 
+    # Ĩ = sens.diodes
+    # if size(Ĩ[Ĩ .> 0.05], 1) < 3 #size( Ĩ[abs.(Ĩ) .> 0.1], 1) < 3  # Less than three diodes are illuminated 
+    #     return estimate_sun_vector_pinv(sens, diodes)
+    # else
+    #     return estimate_sun(sens, diodes)
+    # end
 end
 
-
-
+# Has some error... because of albedo? 
 function estimate_sun_vector_pinv(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
-    n(α, ϵ) = [sin(pi/2 - ϵ)*cos(α); sin(pi/2 - ϵ) * sin(α); cos(pi/2 - ϵ)]
+    # n(α, ϵ) = [sin(pi/2 - ϵ)*cos(α); sin(pi/2 - ϵ) * sin(α); cos(pi/2 - ϵ)]
+    n(α, ϵ) = [cos(ϵ) * cos(α); cos(ϵ) * sin(α); sin(ϵ)]
 
     Ĩ    = sens.diodes ./ diodes.calib_values 
     azi  = diodes.azi_angles
@@ -350,11 +358,35 @@ function estimate_sun_vector_pinv(sens::SENSORS{N, T}, diodes::DIODES{N, T}) whe
 
     ŝ = (ns' * ns) \ (ns' * Ĩ)
 
-    # REMOVE! 
-    # if size(Ĩ[Ĩ .> 0.1], 1) < 3
-    #     @infiltrate
+    return ŝ / norm(ŝ)
+end
+
+function estimate_sun(sens, diodes)
+    # n(α, ϵ) = [sin(pi/2 - ϵ)*cos(α); sin(pi/2 - ϵ) * sin(α); cos(pi/2 - ϵ)]
+    n(α, ϵ) = [cos(ϵ) * cos(α); cos(ϵ) * sin(α); sin(ϵ)]
+
+    Ĩ    = sens.diodes ./ diodes.calib_values 
+    azi  = diodes.azi_angles
+    elev = diodes.elev_angles 
+
+    azi  = azi[Ĩ .> 0.0] 
+    elev = elev[Ĩ .> 0.0]
+    Ĩ    = Ĩ[Ĩ .> 0.0]
+    
+    N = size(Ĩ, 1)
+    ns = zeros(eltype(Ĩ),  N, 3) 
+    for i = 1:N
+        ns[i, :] .= n(azi[i], elev[i])
+    end 
+
+    # try 
+    #     ŝ = (ns' * ns) \ (ns' * Ĩ)
+    #     return ŝ / norm(ŝ)
+    # catch 
+    #     @infiltrate 
     # end
 
+    ŝ = (ns' * ns) \ (ns' * Ĩ)
     return ŝ / norm(ŝ)
 end
 
