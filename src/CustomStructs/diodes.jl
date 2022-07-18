@@ -60,7 +60,7 @@ struct DIODES{S, T}
             return DIODES(SVector{N, Float64}(cv), SVector{N, Float64}(aa), SVector{N, Float64}(ea))
         end
 
-        cv = rand(Normal(1.0, 0.125), N)
+        cv = rand(Normal(1.0, 0.18), N)
 
         if N == 6
             aa = [0.0;        pi;   (pi/2); (-pi/2);      0.0;      pi]  
