@@ -109,10 +109,10 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
                 sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
                 next_mode = mag_cal 
+                data = MEKF_DATA()
                 # Bᴵ_pred = IGRF13(sensors.pos, t)
                 # N_samples = Int(round(2 * T_orbit / (mag_ds_rate)))
                 # data = MAG_CALIBRATOR(N_samples, vcat([sensors.magnetometer;]...), Bᴵ_pred);
-                data = MEKF_DATA()
             end
         else 
             next_mode = detumble # Keep detumbling  
@@ -152,7 +152,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             end
         end
 
-    elseif op_mode == chill     # -> diode_cal, (mekf?)
+    elseif op_mode == chill     # -> diode_cal, mekf
         """ chill -> diode_cal 
 
             Temporary mode that is used as a waiting zone until something happens. 
@@ -162,13 +162,20 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             Transitions to 'diode_cal' as soon as the eclipse is over. 
         """
         if flags.in_sun 
-            next_mode = mag_cal # diode_cal 
+            if flags.diodes_calibrated
+                next_mode = mekf 
+                data = MEKF_DATA()
+                q = run_triad(sensors, sat_est, t, flags.in_sun; sᴮ_true = truth.ŝᴮ)  # x.q
+                reset_cov!(sat_est; reset_calibration = false)
+                sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
+            else
+                next_mode = mag_cal # diode_cal 
 
-            data = MEKF_DATA()
-            q = run_triad(sensors, sat_est, t, flags.in_sun; sᴮ_true = truth.ŝᴮ)  # x.q 
-            reset_cov!(sat_est; reset_calibration = true)
-            sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
-
+                data = MEKF_DATA()
+                q = run_triad(sensors, sat_est, t, flags.in_sun; sᴮ_true = truth.ŝᴮ)  # x.q 
+                reset_cov!(sat_est; reset_calibration = true)
+                sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
+            end
         else 
             next_mode = chill
         end
@@ -217,7 +224,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
         if false #!(flags.in_sun)
             next_mode = chill 
         else
-            sat_est = Estimator.estimate(sat_est, sensors, data, alb, t, dt; use_albedo = use_albedo, calibrate_magnetometer = false)
+            sat_est = Estimator.estimate(sat_est, sensors, data, alb, t, dt; use_albedo = use_albedo, calibrate = false)
 
             if norm(sat_est.covariance[1:6, 1:6]) < mekf_cov_thres 
                 next_mode = finished 

@@ -220,7 +220,7 @@ evaluate_diode_cal(results::NamedTuple; kwargs...) = evaluate_diode_cal(results[
 
 # CAN ONLY BE RUN 𝑏𝑒𝑓𝑜𝜖𝑒 it has been calibrated, else it is already corrected 
 function evaluate_mag_cal(sensors::Vector{SENSORS{6, T}}, truths::Vector{GROUND_TRUTH{6, T}}, modes::Vector{Operation_mode}, 
-                            sat0::SATELLITE, satf::SATELLITE; verbose = true) where {T}
+                            sat0::SATELLITE, satf::SATELLITE; verbose = true, force_show = false) where {T}
     # Deal with numerical errors 
     r_acos(x) = (x ≈  1) ? zero(x)    : 
                 (x ≈ -1) ? one(x) * π : acos(x)
@@ -235,8 +235,10 @@ function evaluate_mag_cal(sensors::Vector{SENSORS{6, T}}, truths::Vector{GROUND_
     ef = [ rad2deg( r_acos(normalize(B̂f[i])' * normalize(Bᴮ[i]))) for i = 1:N]
 
     # Once the magnetometer has been calibrated, we have nothing to compare it against (?)
-    e0 = e0[modes .== mag_cal]
-    ef = ef[modes .== mag_cal]
+    if !(force_show)
+        e0 = e0[modes .== mag_cal]
+        ef = ef[modes .== mag_cal]
+    end
     N  = size(e0, 1)
 
     if N > 2
@@ -258,6 +260,7 @@ function evaluate_mag_cal(sensors::Vector{SENSORS{6, T}}, truths::Vector{GROUND_
 end
 evaluate_mag_cal(results::NamedTuple; kwargs...) = evaluate_mag_cal(results[:sensors], results[:truths], results[:modes], results[:sat_ests][1], results[:sat_ests][end]; kwargs...)
 
+# @warn "Monte carlo not using albedo (for speed)! And testing mekf only rn"
 
 function monte_carlo(N = 10)
     # Average pointing error, sun error, mag error (?)
@@ -266,10 +269,10 @@ function monte_carlo(N = 10)
     for i = 1:N
         println("\n---------  $i --------")
         # results = main(; verbose = false, num_orbits = 1.5, initial_state = diode_cal, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0);
-        results = main(; initial_mode = mag_cal, num_orbits = 1.25, verbose = false, use_albedo = false)
+        results = main(; initial_mode = mekf, num_orbits = 1.0, verbose = false, use_albedo = true)
         eq = mekf_report(results; verbose = false)
         es₀, es = evaluate_diode_cal(results; verbose = false)
-        eB₀, eB = evaluate_mag_cal(results; verbose = false)
+        eB₀, eB = evaluate_mag_cal(results; verbose = false, force_show = true)
         eqs[i] = eq 
         ess[i] = es 
         eBs[i] = eB
@@ -285,7 +288,7 @@ function monte_carlo(N = 10)
     μbf, σbf = round(mean(eBs), digits = 2),   round(std(eBs), digits = 2);
     μb0, σb0 = round(mean(eB₀s), digits = 2),  round(std(eB₀s), digits = 2);
     μbd, σbd = round(mean(bDiff), digits = 2), round(std(bDiff), digits = 2);
-    μϕ, σϕ   = round(mean(eqs), digits = 2), round(std(eqs), digits = 2);
+    μϕ, σϕ   = round(mean(eqs), digits = 3), round(std(eqs), digits = 3);
 
     header  = (["Vector", "Initial", "Final", "Difference (fin - init)"], ["N = $N", "μ° (σ°)", "μ° (σ°)", "μ (σ)"]);
     vectors = ["Sun", "Mag", "Attitude"];
@@ -481,3 +484,76 @@ end
 #     end
 # end
 
+
+function figs_for_poster(results)
+    r_acos(x) = (x ≈  1) ? zero(x)    : 
+                (x ≈ -1) ? one(x) * π : acos(x)
+
+    N = size(results[:states], 1);
+    sensors = results[:sensors]; 
+    truths  = results[:truths]; 
+    ests    = results[:sat_ests];
+    states  = results[:states];
+
+    #### Diode Cal 
+    ŝs = [estimate_sun_vector(sensors[i], ests[i].diodes) for i = 1:N];
+    sᴮ = [truths[i].ŝᴮ for i = 1:N];
+    es = [ rad2deg( r_acos(ŝs[i]' * sᴮ[i])) for i = 1:5:N];
+
+    idx = 1
+    Cs = [results[:sat_ests][i].diodes.calib_values[idx] for i = 1:5:N];         # Down sample to make it in seconds
+    αs = [rad2deg(results[:sat_ests][i].diodes.azi_angles[idx])  for i = 1:5:N];
+    ϵs = [rad2deg(results[:sat_ests][i].diodes.elev_angles[idx]) for i = 1:5:N];
+
+    C₀, α₀, ϵ₀ = Cs[idx], αs[idx], ϵs[idx]
+    C, α, ϵ = results[:sat_truth].diodes.calib_values[idx], rad2deg(results[:sat_truth].diodes.azi_angles[idx]), rad2deg(results[:sat_truth].diodes.elev_angles[idx]);
+
+    # pc = plot(Cs, title = "Calibration Value", label = "Estimate", ylabel = "Magnitude", xlabel = "Time (s)");  hline!([C₀], ls = :dot, c = :red, label = "Initial Guess"); hline!([C], ls = :dash, c = :green, label = "True Value", legend = false);
+    # pa = plot(αs, title = "Azimuth Angle", label = "Estimate", ylabel = "Angle (deg)", xlabel = "Time (s)");    hline!([α₀], ls = :dot, c = :red, label = "Initial Guess"); hline!([α], ls = :dash, c = :green, label = "True Value");
+    # pe = plot(ϵs, title = "Elevation Angle", label = "Estimate", ylabel = "Angle (deg)", xlabel = "Time (s)");  hline!([ϵ₀], ls = :dot, c = :red, label = "Initial Guess"); hline!([ϵ], ls = :dash, c = :green, label = "True Value", legend = false);
+    # ps = plot(es, title = "Estimation Error", label = "Sun Vector", ylabel = "Error (deg)", xlabel = "Time (s)")
+
+    pc = plot(Cs, label = false); hline!([C₀], ls = :dot, c = :red, label = false); hline!([C], ls = :dash, c = :green, label = false, legend = false);
+    pa = plot(αs, label = false); hline!([α₀], ls = :dot, c = :red, label = false); hline!([α], ls = :dash, c = :green, label = false);
+    pe = plot(ϵs, label = false); hline!([ϵ₀], ls = :dot, c = :red, label = false); hline!([ϵ], ls = :dash, c = :green, label = false, legend = false);
+    # ps = plot(es, label = false); 
+    cal_plot = plot(pc, pa, pe, xlim = [1, 2500], legend = false)
+
+    ### Magnetometer Calibration 
+    B̂0 = [correct_magnetometer(ests[1],   sensors[i].magnetometer) for i = 1:N];
+    B̂f = [correct_magnetometer(ests[end], sensors[i].magnetometer) for i = 1:N];
+    Bᴮ = [truths[i].Bᴮ for i = 1:N];
+
+    e0 = [ rad2deg( r_acos(normalize(B̂0[i])' * normalize(Bᴮ[i]))) for i = 1:N];
+    ef = [ rad2deg( r_acos(normalize(B̂f[i])' * normalize(Bᴮ[i]))) for i = 1:N];
+
+    μ0 = round(sum(e0) / N, digits = 2); μf = round(sum(ef) / N, digits = 2);
+    h0 = histogram(e0, normalize = true, ylabel = "Frequency", xlabel = "Error", title = "Before Calibration", label = "μ = $μ0");
+    hf = histogram(ef, normalize = true, ylabel = "Frequency", xlabel = "Error", title = "After Calibration", label = "μ = $μf");
+    mag_plot = plot(h0, hf, plot_title = "Magnetometer Calibration", layout = (2, 1))
+
+
+    ### MEKF 
+    qs = [states[i].q for i = 1:5:N]; qs = reduce(hcat, qs)'; 
+    q̂s = [est_hist[i].state.q for i = 1:5:N]; q̂s = reduce(hcat, q̂s)';
+    mekf_plot = plot(qErrs, label = false, title = "Attitude Error", xlabel = "Time (s)", ylabel = "Error magnitude", xlim = [1, 2500])
+
+
+    ### Detumbling 
+    modes = results[:modes]
+    Nd = findall( (modes .== detumble) .== 0)[1]
+    ωs = [states[i].ω for i = 1:Nd]; ωs = reduce(hcat, ωs)';
+    ω̂s = [sensors[i].gyro for i = 1:Nd]; ω̂s = reduce(hcat, ω̂s)';
+    nω = [norm(ωs[i, :]) for i = 1:5:Nd];
+    nω̂ = [norm(ω̂s[i, :]) for i = 1:5:Nd];
+    τ₁ = 15 # deg2rad(15)
+    τ₂ = 5
+    
+    plot(rad2deg.(nω̂ ), label = "Measured", title = "Gyroscope");
+    plot!(rad2deg.(nω), label = "Truth", xlabel = "Time (s)", ylabel = "Magnitude (deg/s)", ls = :dash);
+    hline!([τ₁], label = "Initial Detumble", ls = :dot, c = :gray)
+    det_plot = hline!([τ₂], label = "Final Detumble", ls = :dot, c = :gray)
+
+
+    return cal_plot, mag_plot, mekf_plot, det_plot
+end

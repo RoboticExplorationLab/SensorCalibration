@@ -72,8 +72,10 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
         x₀, T_orbit = get_initial_state(; detumbled = true)
         flags = FLAGS(; init_detumble = true, mag_cal = true, dio_cal = true, final_detumble = true)
         sat_truth = SATELLITE(; sta =  SAT_STATE(; q = x₀.q, β = x₀.β))
-        sat_est   = SATELLITE(; J = sat_truth.J, mag = sat_truth.magnetometer, dio = sat_truth.diodes, sta = SAT_STATE(; ideal = true))
-        op_mode = chill;      # Will switch over after first iteration
+        # sat_est   = SATELLITE(; J = sat_truth.J, mag = sat_truth.magnetometer, dio = sat_truth.diodes, sta = SAT_STATE(; ideal = true))
+
+        sat_est   = SATELLITE(; J = sat_truth.J, sta = SAT_STATE(; ideal = true), mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true))
+        op_mode = detumble;      # Will switch over after first iteration
 
     else
         @error "Invalid initial state! Cannot use $initial_state"
@@ -110,7 +112,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
                                                                         dt, op_mode, flags, i, progress_bar, T_orbit, data; 
                                                                         use_albedo = use_albedo, kwargs...)
 
-        if verbose
+        if (verbose) && (i > 2)
             # Evaluate detumbling 
             (prev_mode == detumble) && (op_mode != detumble) && (initial_mode != mag_cal) && detumbler_report(states[1:i - 1], sensors[1:i - 1])
 
@@ -134,13 +136,13 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
         modes[i]     = op_mode 
 
         if op_mode == term_mode  # Trim the data and break 
-            truths    = truths[1:i - 1]
+            truths    = truths[1:i  - 1]
             sensors   = sensors[1:i - 1]
-            ecls      = ecls[1:i - 1] 
-            noises    = noises[1:i - 1]
-            states    = states[1:i - 1]
+            ecls      = ecls[1:i    - 1] 
+            noises    = noises[1:i  - 1]
+            states    = states[1:i  - 1]
             sat_ests  = sat_ests[1:i - 1] 
-            modes     = modes[1:i - 1] 
+            modes     = modes[1:i   - 1] 
 
             @info "BREAKING EARLY!"
             break
@@ -178,7 +180,7 @@ function get_initial_state(; _Re = 6378136.3, detumbled = false, bias_less = fal
     q₀ = randn(4);  q₀ = SVector{4, Float64}(q₀ / norm(q₀))
 
     # If it is too low, it is bad for calibration, so we don't want zero mean
-    ω₀ = (detumbled) ? rand(Normal(0.06, 0.02)) : rand(Normal(0.35, 0.15), 3)
+    ω₀ = (detumbled) ? rand(Normal(0.04, 0.02)) : rand(Normal(0.35, 0.15), 3)
     ω₀ = SVector{3, Float64}(ω₀ .* sign.(randn(3)))
     
     # ω₀ = (detumbled) ? SVector{3, Float64}(0.07 * randn(3)) : SVector{3, Float64}(0.4 * randn(3))
@@ -204,7 +206,7 @@ function get_albedo(scale = 1)
 
     refl = load_refl("data/refl.jld2", scale)  
     cell_centers_ecef = get_albedo_cell_centers(lat_step, lon_step) 
-    return Simulator.ALBEDO(refl, cell_centers_ecef)
+    return ALBEDO(refl, cell_centers_ecef)
 end;
 
 function get_albedo_cell_centers(lat_step = 1, lon_step = 1.25)
@@ -250,20 +252,34 @@ end;
 
 # @info "No Noise!"; results = main(; num_orbits = 1.25, initial_mode = mag_cal, use_albedo = false, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
 # @info "Partial Noise!"; results = main(; num_orbits = 1.25, initial_mode = mag_cal, σB = deg2rad(0.00), σ_current = 0.00);
-# @info "Full Noise!"; results = main(; initial_mode = mag_cal, num_orbits = 0.25, use_albedo = false); # initial_mode = mag_cal, use_albedo = false); 
-# sat_truth, sat_est, truths, sensors, dioecls, noises, states, sat_ests, op_modes 
+# @info "Full Noise!"; results = main(; initial_mode = mag_cal, num_orbits = 0.5, use_albedo = false); 
+# sat_truth, sat_est, truths, sensors, ecls, noises, states, sat_ests, op_modes 
 
 # diode_calibration_report(results)
+
+# Random.seed!(10)
+# @info "Full Noise!"; results = main(; initial_mode = mag_cal, num_orbits = 0.08, use_albedo = false); 
 # diode_self_consistency(results)
 # mag_self_consistency(results)
 
+# Random.seed!(2000)
+# @info "Full Noise!"; results = main(; initial_mode = mag_cal, num_orbits = 0.08, use_albedo = false); 
+# diode_self_consistency(results)
+# mag_self_consistency(results)
+
+# Random.seed!(3000)
+# @info "Full Noise!"; results = main(; initial_mode = mag_cal, num_orbits = 0.08, use_albedo = false); 
+# diode_self_consistency(results)
+# mag_self_consistency(results)
 
 # display(plot(results[:states]))
 # display(plot(results[:sensors]))
 # diode_calibration_report(results)
 # mekf_report(results)
 
-eqs, ess, eBs, es₀s, eB₀s = monte_carlo(15);
+
+# Verify initial condits are different 
+eqs, ess, eBs, es₀s, eB₀s = monte_carlo(20);
 
 
 println("Done!")
