@@ -33,7 +33,7 @@
     Returns:
       - x:   updated STATE struct                                     |  STATE
 """
-function dynamics(J::SMatrix{3, 3, T, 9}, x::STATE{T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = 3.14e-5, kwargs...) where {T}
+function dynamics(J::SMatrix{3, 3, T, 9}, x::STATE{T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = 3.14e-2, kwargs...) where {T}
 
     if norm(x.r) < Rₑ                  
         error("ERROR: Impact at time $t")

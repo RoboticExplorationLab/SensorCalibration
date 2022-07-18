@@ -67,13 +67,17 @@ function RecipesBase.plot(s::Vector{SENSORS{6, T}}, sensor::Symbol = :a; start =
         
     elseif sensor == :g 
         gyrs = [s[i].gyro for i = start:N]; gyrs = reduce(hcat, gyrs)';
+        ng   = [norm(gyrs[i]) for i = start:N]
         gs = []
+
         labels = ["x", "y", "z"]
         for i = 1:3 
             g = plot(rad2deg.(gyrs[:, i]), label = labels[i], xlabel = "Index", ylabel = "Vel (deg/s)")
             push!(gs, g)
         end
-        return plot(gs..., plot_title = "Gyro Measurements", layout = 3)
+        pn = plot(rad2deg.(ng), label = "Magnitude")
+        push!(gs, pn)
+        return plot(gs..., plot_title = "Gyro Measurements")
 
     elseif sensor == :p
         poss = [s[i].pos          for i = start:N]; poss = reduce(hcat, poss)';

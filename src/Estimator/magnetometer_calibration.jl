@@ -122,7 +122,6 @@ function update!(mag_cal::MAG_CALIBRATOR{T}, bm::SVector{3, T}, bp::Vector{T}) w
     update!(mag_cal, vcat([bm;]...), bp)
 end
 
-
 """
     estimate(sat, data)
 
@@ -253,7 +252,6 @@ function gauss_newton(x0, data::MAG_CALIBRATOR{T}; max_iters = 50, ls_iters = 20
     return x
 end
 
-
 """
     residual(x, data)
 
@@ -362,7 +360,6 @@ function vec_to_matrix_bias(p::Vector{ET}) where {ET}
 
     return T, β
 end
-
 
 """
     extract_elements(T, β)

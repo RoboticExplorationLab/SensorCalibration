@@ -9,7 +9,6 @@
  - Read up on setting initial covariances too
 
  - When in eclipse, dont use I and don't use the Ĩ for z or H either (adjust sizes)
- - Easy functionality for testing (self-consistency, innovation `z` is unbiased noise, etc... )
 """
 
 """
@@ -29,7 +28,7 @@ struct MEKF_DATA{T}
         new{T}(Wchol, Vchol)
     end
 
-    function MEKF_DATA(; N = 6, σ_mag = deg2rad(20), σ_cur = 0.05, # σ_mag = deg2rad(3.0), σ_cur = 0.1,
+    function MEKF_DATA(; N = 6, σ_mag = deg2rad(30), σ_cur = 0.05, # σ_mag = deg2rad(3.0), σ_cur = 0.1,
                             σs = 1e-5, σζ = deg2rad(0.01), σβₘ = 1e-5,  
                             σC = 1e-5, σα = deg2rad(0.01), σϵ = deg2rad(0.01),
                             gyro_bias_instability = 0.8,   # in deg/hour  
@@ -39,7 +38,7 @@ struct MEKF_DATA{T}
 
         ## Process Noise:
         σ_gyro = 5e-4 #deg2rad(gyro_bias_instability) / 3600.0  # Convert (deg/hour) to (rad/sec)
-        σ_bias = 3.14e-5 # deg2rad(angle_random_walk) / 60.0        # Convert (deg/sqrt(hour)) to ( rad/sqrt(s) )
+        σ_bias = 3.14e-2 # 3.14e-5 # deg2rad(angle_random_walk) / 60.0        # Convert (deg/sqrt(hour)) to ( rad/sqrt(s) )
         
         # Just using the same bias noise for both 
         W = Diagonal( [σ_gyro * ones(3); σ_bias * ones(3); σs * ones(3); σζ * ones(3); σβₘ * ones(3); σC * ones(N); σα * ones(N); σϵ * ones(N)].^2 )
@@ -148,7 +147,7 @@ function estimate(sat::SATELLITE{N, T}, sens::SENSORS{N, T}, noise::MEKF_DATA{T}
     Wchol = (calibrate) ? noise.Wchol    : UpperTriangular(noise.Wchol[1:6, 1:6])
 
     # Remember to change reports for self consistency too
-    x⁺, mag⁺, diode⁺, Pchol⁺ = iter_sqrt_mekf(sat.state, sat.diodes, sat.magnetometer, Pchol, alb, sens.gyro, Bᴵ_est, sᴵ_est,
+    x⁺, mag⁺, diode⁺, Pchol⁺ = sqrt_mekf(sat.state, sat.diodes, sat.magnetometer, Pchol, alb, sens.gyro, Bᴵ_est, sᴵ_est,
                                          sens.magnetometer, sens.diodes, sens.pos, dt, Wchol, noise.Vchol; 
                                          use_albedo = use_albedo, calibrate = calibrate, E_am₀ = E_am₀)
 
