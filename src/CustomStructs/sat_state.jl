@@ -13,8 +13,8 @@ struct SAT_STATE{T}
     function SAT_STATE(q::SVector{4, T}, β::SVector{3, T}) where {T}
         """ Primary Constructor """
 
-        q = (norm(q) == 1) ? q  : (q / norm(q))
-        q = (q[1] < 0)  ?  -q : q                   # Because quaternions double cover, we force the scalar to be positive
+        # q = (norm(q) == 1) ?  q : (q / norm(q))
+        # q = (q[1] < 0)     ? -q : q                   # Because quaternions double cover, we force the scalar to be positive
         new{T}(q, β)
     end
 

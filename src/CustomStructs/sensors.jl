@@ -52,7 +52,7 @@ function RecipesBase.plot(s::Vector{SENSORS{6, T}}, sensor::Symbol = :a; start =
             push!(ms, m)
         end
 
-        return plot(ms..., plot_title = "Magnetometer Measurements", layout = 3)
+        return plot(ms..., plot_title = "Magnetometer Measurements")
 
     elseif sensor == :d
         dios = [s[i].diodes for i = start:N]; dios = reduce(hcat, dios)'; 
@@ -73,7 +73,10 @@ function RecipesBase.plot(s::Vector{SENSORS{6, T}}, sensor::Symbol = :a; start =
             g = plot(rad2deg.(gyrs[:, i]), label = labels[i], xlabel = "Index", ylabel = "Vel (deg/s)")
             push!(gs, g)
         end
-        return plot(gs..., plot_title = "Gyro Measurements", layout = 3)
+        pn = plot(rad2deg.(ng), label = "Magnitude")
+        push!(gs, pn)
+
+        return plot(gs..., plot_title = "Gyro Measurements")
 
     elseif sensor == :p
         poss = [s[i].pos          for i = start:N]; poss = reduce(hcat, poss)';
@@ -83,7 +86,7 @@ function RecipesBase.plot(s::Vector{SENSORS{6, T}}, sensor::Symbol = :a; start =
             p = plot(poss[:, i], label = labels[i])
             push!(ps, p)
         end
-        return plot(ps..., plot_title = "Position Measurements", layout = 3)
+        return plot(ps..., plot_title = "Position Measurements")
 
     else 
         println("Warning! Symbol $sensor not supported yet!")

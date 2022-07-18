@@ -7,7 +7,7 @@
  - Make this a module, return a dict from main, etc... (include state_machine)
 """
 
-using Infiltrator, Test
+using Infiltrator, Test, PrettyTables
 
 using StaticArrays, SatelliteDynamics, EarthAlbedo 
 using Distributions, LinearAlgebra, Plots, JLD2, Random
@@ -72,6 +72,7 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
         flags = FLAGS(; init_detumble = true, mag_cal = true, dio_cal = true, final_detumble = true)
         sat_truth = SATELLITE(; sta =  SAT_STATE(; q = x₀.q, β = x₀.β))
         sat_est   = SATELLITE(; J = sat_truth.J, mag = sat_truth.magnetometer, dio = sat_truth.diodes, sta = SAT_STATE(; ideal = true))
+        # sat_est = SATELLITE(; J = sat_truth.J, mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true), sta = SAT_STATE(; ideal = true))
         op_mode = chill;      # Will switch over after first iteration
 
     else
@@ -110,12 +111,12 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
                                                                         dt, op_mode, flags, i, progress_bar, T_orbit, data; 
                                                                         use_albedo = use_albedo, kwargs...)
 
-        if verbose
+        if verbose && ( i > 2) 
             # Evaluate detumbling 
             (prev_mode == detumble) && (op_mode != detumble) && detumbler_report(states[1:i - 1], sensors[1:i - 1])
 
             # Evaluate performance of magnetometer calibration 
-            (prev_mode ==   mag_cal) && (op_mode != mag_cal) && magnetometer_calibration_report(sat_truth, sat_est, sat_ests[1])
+            (prev_mode ==   mag_cal) && (op_mode != mag_cal) && (flags.magnetometer_calibrated) && magnetometer_calibration_report(sat_truth, sat_est, sat_ests[1])
 
             # Evaluate performance of diode calibration 
             (prev_mode == diode_cal) && (op_mode != diode_cal) && (flags.diodes_calibrated) && diode_calibration_report(sat_truth, sat_ests[1:i-1]) 
@@ -164,11 +165,11 @@ end
 # Helper functions
 function get_initial_state(; _Re = 6378136.3, detumbled = false, bias_less = false) 
     ecc = 0.0001717 + 0.001 * randn()
-    inc = 51.6426 + 5 * randn()
-    Ω   = 178.1369 + 5 * randn()
-    ω   = 174.7410 + 5 * randn()
+    inc = 51.6426  + 12 * randn()
+    Ω   = 178.1369 + 20 * randn()
+    ω   = 174.7410 + 20 * randn()
     M   = 330.7918 + 50 * randn()   # +94/95 is just before sun, -40 is just before eclipse
-    sma = (_Re + 421e3 + 1000 * randn()) / (1 + ecc)  # Apogee = semi_major * (1 + ecc)
+    sma = (_Re + 421e3 + 10000 * randn()) / (1 + ecc)  # Apogee = semi_major * (1 + ecc)
 
     oe0 = [sma, ecc, inc, Ω, ω, M]   # Initial state, oscullating elements
     eci0 = sOSCtoCART(oe0, use_degrees = true) # Convert to Cartesean
@@ -178,11 +179,11 @@ function get_initial_state(; _Re = 6378136.3, detumbled = false, bias_less = fal
     q₀ = randn(4);  q₀ = SVector{4, Float64}(q₀ / norm(q₀))
 
     # If it is too low, it is bad for calibration, so we don't want zero mean
-    ω₀ = (detumbled) ? rand(Normal(0.06, 0.02)) : rand(Normal(0.35, 0.15), 3)
+    ω₀ = (detumbled) ? rand(Normal(0.05, 0.02)) : rand(Normal(0.35, 0.15), 3)
     ω₀ = SVector{3, Float64}(ω₀ .* sign.(randn(3)))
     
     # ω₀ = (detumbled) ? SVector{3, Float64}(0.07 * randn(3)) : SVector{3, Float64}(0.4 * randn(3))
-    β₀ = (bias_less) ? SVector{3, Float64}(0.0, 0.0, 0.0)  : SVector{3, Float64}(rand(Normal(0.0, deg2rad(2)), 3)) # Initial guess can be a bit off
+    β₀ = (bias_less) ? SVector{3, Float64}(0.0, 0.0, 0.0)  : SVector{3, Float64}(rand(Normal(0.0, deg2rad(5)), 3)) # Initial guess can be a bit off
     
     T_orbit = orbit_period(oe0[1])
     x = STATE(r₀, v₀, q₀, ω₀, β₀)
@@ -250,12 +251,20 @@ end;
 #     global temp = main(; num_orbits = 0.5, initial_mode = diode_cal)
 # end
 
-
-# @info "No Noise!"; results = main(; σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
-@info "Full Noise!"; results = main(); 
+# @info "No Noise!"; results = main(; num_orbits = 4, initial_mode = detumble, use_albedo = false, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
+# @info "Partial Noise!"; results = main(; num_orbits = 1.25, initial_mode = mag_cal, σB = deg2rad(0.00), σ_current = 0.00);
+@info "Full Noise!"; results = main(; initial_mode = mekf, num_orbits = 0.25, use_albedo = true); 
 # sat_truth, sat_est, truths, sensors, ecls, noises, states, sat_ests, op_modes 
 
 # display(plot(results[:states]))
 # display(plot(results[:sensors]))
 # diode_calibration_report(results)
+# diode_self_consistency(results)
 # mekf_report(results)
+
+# Random.seed!(1000)
+# @info "Full Noise!"; results = main(; initial_mode = diode_cal, num_orbits = 0.03, use_albedo = true); 
+# diode_self_consistency(results)
+
+
+println("Done!");

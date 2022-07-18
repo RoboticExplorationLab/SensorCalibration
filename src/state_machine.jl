@@ -44,8 +44,8 @@
 """
 function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}, t::Epoch, dt::Real, op_mode::Operation_mode, 
                 flags::FLAGS, idx::Int, progress_bar, T_orbit, data; use_albedo = true, initial_detumble_thresh = deg2rad(15), final_detumble_thresh = deg2rad(8),  # was 25, 10 deg
-                mag_ds_rate = 60, calib_cov_thres = 0.036, mekf_cov_thres = 0.004, σβ = 3.14e-5, σB = deg2rad(0.25), σ_gyro = 0.5e-4, 
-                σr = 5e3, σ_current = 0.05 ) where {T}
+                mag_ds_rate = 60, calib_cov_thres = 0.005, mekf_cov_thres = 0.004, σβ =1.45e-5, σB = 0.3e-6, σ_gyro = 1.22e-4, 
+                σr = 2e4, σ_current = 0.01) where {T}
 
     t += dt   # Update time
 
@@ -168,13 +168,20 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
             Transitions to 'diode_cal' as soon as the eclipse is over. 
         """
         if flags.in_sun 
-            next_mode = diode_cal 
+            if flags.diodes_calibrated 
+                next_mode = mekf 
+                data = MEKF_DATA()
+                q = run_triad(sensors, sat_est, t, flags.in_sun)
+                reset_cov!(sat_est; reset_calibration = false)
+                sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
+            else
+                next_mode = diode_cal 
 
-            data = MEKF_DATA()
-            q = run_triad(sensors, sat_est, t, flags.in_sun)  # x.q 
-            reset_cov!(sat_est; reset_calibration = true)
-            sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
-
+                data = MEKF_DATA()
+                q = run_triad(sensors, sat_est, t, flags.in_sun)  # x.q 
+                reset_cov!(sat_est; reset_calibration = true)
+                sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
+            end
         else 
             next_mode = chill
         end
@@ -201,11 +208,11 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
             # Check if covariance of calibration states is low enough to fix
             if norm(sat_est.covariance[7:end, 7:end]) < calib_cov_thres 
-                next_mode = detumble 
+                next_mode = finished #detumble 
                 flags.diodes_calibrated = true 
             end
 
-            notes = "mode: $op_mode \t||Σ|| = $(norm(sat_est.covariance[7:end, 7:end])) \t ||ΣC|| = $(norm(sat_est.covariance[7:12, 7:12])) \t ||Σα|| = $(norm(sat_est.covariance[13:18, 13:18])) \t ||Σϵ|| = $(norm(sat_est.covariance[19:24, 19:24]))"
+            notes = "mode: $op_mode \t||Σ|| = $(round(norm(sat_est.covariance[7:end, 7:end]), digits = 4)),\t ||ΣC|| = $(round(norm(sat_est.covariance[7:12, 7:12]), digits = 4)) \t ||Σα|| = $(round(norm(sat_est.covariance[13:18, 13:18]), digits = 4)) \t ||Σϵ|| = $(round(norm(sat_est.covariance[19:24, 19:24]), digits = 4))"
         end
 
 
@@ -323,10 +330,68 @@ function triad(r₁ᴵ,r₂ᴵ,r₁ᴮ,r₂ᴮ)
 end
 
 
+
 # The Pseudo-inv method would probably be sketchy IRL because when the sun isn't illuminating 3+ diodes it would fail
 # This method does not rely on knowledge of photodiode setup in advance
 # Also, even with perfect estimates for the diode parameters this still gets ~2* error
-function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
+function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}; sᴮ_true = nothing) where {N, T}
+    
+    try 
+        ŝ = estimate_sun(sens, diodes)
+        return ŝ
+    catch 
+        ŝ = estimate_sun_vector_pinv(sens, diodes)
+        return ŝ
+    end
+end
+
+# Has some error... because of albedo? 
+function estimate_sun_vector_pinv(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
+    # n(α, ϵ) = [sin(pi/2 - ϵ)*cos(α); sin(pi/2 - ϵ) * sin(α); cos(pi/2 - ϵ)]
+    n(α, ϵ) = [cos(ϵ) * cos(α); cos(ϵ) * sin(α); sin(ϵ)]
+
+    Ĩ    = sens.diodes ./ diodes.calib_values 
+    azi  = diodes.azi_angles
+    elev = diodes.elev_angles 
+    
+
+    ns = zeros(eltype(Ĩ),  6, 3) 
+    for i = 1:6 
+        ns[i, :] .= n(azi[i], elev[i])
+    end 
+
+    ŝ = (ns' * ns) \ (ns' * Ĩ)
+
+    return ŝ / norm(ŝ)
+end
+
+function estimate_sun(sens, diodes)
+    # n(α, ϵ) = [sin(pi/2 - ϵ)*cos(α); sin(pi/2 - ϵ) * sin(α); cos(pi/2 - ϵ)]
+    n(α, ϵ) = [cos(ϵ) * cos(α); cos(ϵ) * sin(α); sin(ϵ)]
+
+    Ĩ    = sens.diodes ./ diodes.calib_values 
+    azi  = diodes.azi_angles
+    elev = diodes.elev_angles 
+
+    azi  = azi[Ĩ .> 0.0] 
+    elev = elev[Ĩ .> 0.0]
+    Ĩ    = Ĩ[Ĩ .> 0.0]
+    
+    N = size(Ĩ, 1)
+    ns = zeros(eltype(Ĩ),  N, 3) 
+    for i = 1:N
+        ns[i, :] .= n(azi[i], elev[i])
+    end 
+
+    ŝ = (ns' * ns) \ (ns' * Ĩ)
+    return ŝ / norm(ŝ)
+end
+
+
+# The Pseudo-inv method would probably be sketchy IRL because when the sun isn't illuminating 3+ diodes it would fail
+# This method does not rely on knowledge of photodiode setup in advance
+# Also, even with perfect estimates for the diode parameters this still gets ~2* error
+function estimate_sun_vector_old2(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
     n(α, ϵ) = [sin(pi/2 - ϵ)*cos(α); sin(pi/2 - ϵ) * sin(α); cos(pi/2 - ϵ)]
 
     Ĩ    = sens.diodes ./ diodes.calib_values 

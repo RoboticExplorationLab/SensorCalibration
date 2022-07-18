@@ -26,16 +26,16 @@ struct MEKF_DATA{T}
         new{T}(Wchol, Vchol)
     end
 
-    function MEKF_DATA(; N = 6, σ_mag = deg2rad(2.0), σ_cur = 0.1,
-                            σC = 1e-4, σα = deg2rad(0.01), σϵ = deg2rad(0.01),  # Was 0.1, 3, 3
+    function MEKF_DATA(dt = 0.2; N = 6, σ_mag = deg2rad(8.0), σ_cur = 0.05,
+                            σC = 1e-5, σα = deg2rad(0.01), σϵ = deg2rad(0.01),  # Was 0.1, 3, 3
                             gyro_bias_instability = 0.8,   # in deg/hour  
                             angle_random_walk     = 0.06)  # in deg/sqrt(hour)
 
         """ Generates a new MEKF_DATA by generating the W and V matrices with the provided values """
 
         ## Process Noise:
-        σ_gyro = deg2rad(gyro_bias_instability) / 3600.0  # Convert (deg/hour) to (rad/sec)
-        σ_bias = deg2rad(angle_random_walk) / 60.0        # Convert (deg/sqrt(hour)) to ( rad/sqrt(s) )
+        σ_gyro = 5e-4 # 1.22e-4 * dt # deg2rad(gyro_bias_instability) / 3600.0  # Convert (deg/hour) to (rad/sec)
+        σ_bias = 5e-5 # 1.45e-5 * dt # deg2rad(angle_random_walk) / 60.0        # Convert (deg/sqrt(hour)) to ( rad/sqrt(s) )
         
         W = Diagonal( [σ_gyro * ones(3); σ_bias * ones(3); σC * ones(N); σα * ones(N); σϵ * ones(N)].^2 )
         Wchol = chol(Matrix(W)) 
@@ -63,6 +63,9 @@ end
 function reset_cov!(sat::SATELLITE{N, T}; reset_calibration = false, σϕ = deg2rad(10), σβ = deg2rad(10), 
                         σC = 0.3, σα = deg2rad(9), σϵ = deg2rad(9)) where {N, T}
     
+
+    return nothing
+
     # # Update Covariances 
     # Reset q, increase β, pass C, α, and ϵ
     Σϕ = diagm( σϕ * ones(3) )  # Reset (remember this is Cholesky so no σ²)
@@ -179,38 +182,6 @@ function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb:
     # Update 
     x⁺, diodes⁺ = update(x_pred, diodes, L, z; calibrate_diodes = calibrate_diodes) 
     Pchol⁺ = qrᵣ([ Pchol_pred * (I - L * H)'; V * L']); 
-
-
-
-    
-    # ### ITERATION 2 ###
-    # # Prediction 
-    # x_pred = x⁺ 
-    # _, A = prediction(x⁺, ω, dt, N; calibrate_diodes = calibrate_diodes)
-    
-    # Pchol_pred = qrᵣ([Pchol * A'; W])  # Update covariance (as Cholesky)
-
-    # # Measurement 
-    # Bᴮ_exp, H_mag = mag_measurement(x_pred, Bᴵ, N; calibrate_diodes = calibrate_diodes)
-    # I_exp,  H_cur = current_measurement(x_pred, diodes, sᴵ, pos, alb; E_am₀ = E_am₀,
-    #                             use_albedo = use_albedo, calibrate_diodes = calibrate_diodes)
-
-    # # Innovation 
-    # z = [B̃ᴮ - Bᴮ_exp; Ĩ - I_exp]
-    # # @infiltrate
-
-    # # H_mag *= 2 
-    # # H_cur[:, 1:3] *= 2
-    # H = [H_mag; H_cur]
-
-    # # Kalman Gain (how much we trust the measurement over the dynamics)
-    # Pchol_yy = qrᵣ([Pchol_pred * H'; V])
-    # L = (((Pchol_pred' * Pchol_pred * H') / Pchol_yy) / Pchol_yy')
-    # # ^ the above is the same as Pp * H' * inv(Pyy), for non-sqrt
-
-    # # Update 
-    # x⁺, diodes⁺ = update(x_pred, diodes, L, z; calibrate_diodes = calibrate_diodes) 
-    # Pchol⁺ = qrᵣ([ Pchol_pred * (I - L * H)'; V * L']); 
 
     return x⁺, diodes⁺, Pchol⁺
 end

@@ -49,17 +49,17 @@
 
 """
 function generate_measurements(sat::SATELLITE, alb::ALBEDO, x::STATE, t::Epoch, dt::T; 
-                                E_am₀ = 1366.9, σB = deg2rad(0.25), σ_gyro = 5e-2, 
-                                σr = 5e3, σ_current = 0.05, use_albedo = true) where {T}
+                                E_am₀ = 1366.9, σB = 0.3e-6, σ_gyro = 1.22e-4, 
+                                σr = 2e4, σ_current = 0.01, use_albedo = true) where {T}
 
     ᴮQᴵ = quat2rot(x.q)'  # Compute once and pass in 
 
     # Call each sensor
-    Bᴵ, Bᴮ, B̃ᴮ  = mag_measurement( sat, x, ᴮQᴵ, t, dt; σ = σB) 
-    w, w̃, ηw    = gyro_measurement(x; σ_scale = σ_gyro) 
+    Bᴵ, Bᴮ, B̃ᴮ  = mag_measurement( sat, x, ᴮQᴵ, t, dt; σ = σB * dt) 
+    w, w̃, ηw    = gyro_measurement(x; σ = σ_gyro * dt) 
     r, r̃, ηr    = pos_measurement( x; σ = σr) 
     sᴵ, sᴮ, ecl = sun_measurement( x, ᴮQᴵ, t)
-    I, Ĩ, ηI    = diode_measurement(sat, alb, x, ecl, sᴵ, sᴮ; σ_scale = σ_current, E_am₀ = E_am₀, use_albedo = use_albedo)
+    I, Ĩ, ηI    = diode_measurement(sat, alb, x, ecl, sᴵ, sᴮ; σ = σ_current, E_am₀ = E_am₀, use_albedo = use_albedo)
 
     # Store the outputs 
     sensors = SENSORS(B̃ᴮ, Ĩ, w̃, r̃)
@@ -93,15 +93,17 @@ end
       - `Bᴮ`: Magnetic field vector in body frame (noiseless)                                   | [3,] (SVector)
       - `B̃ᴮ`: Measured magnetic field vector in body frame (noisy, biased, and un-calibrated)   | [3,] (SVector)
 """
-function mag_measurement(sat::SATELLITE, x::STATE, ᴮQᴵ::SMatrix{3, 3, T, 9}, t::Epoch, dt::T; σ = deg2rad(0.25)) where {T}
+function mag_measurement(sat::SATELLITE, x::STATE, ᴮQᴵ::SMatrix{3, 3, T, 9}, t::Epoch, dt::T; σ = 0.3e-6) where {T}
 
     Bᴵ = SVector{3, Float64}(IGRF13(x.r, t))   # Mag vector in inertial frame 
     Bᴮ = ᴮQᴵ * Bᴵ 
 
-    # Add in noise
-    η_mag = rotation_noise(σ, dt)
+    # # Add in noise
+    # η_mag = rotation_noise(σ, dt)
     mag_calibration_matrix = get_mag_calibration_matrix(sat)
-    B̃ᴮ = (η_mag * mag_calibration_matrix * Bᴮ) + sat.magnetometer.bias 
+    # B̃ᴮ = (η_mag * mag_calibration_matrix * Bᴮ) + sat.magnetometer.bias 
+
+    B̃ᴮ = mag_calibration_matrix * Bᴮ + sat.magnetometer.bias + rand(Normal(0.0, σ), 3)
 
     return Bᴵ, Bᴮ, B̃ᴮ
 end
@@ -123,9 +125,9 @@ end
       - ηw: Gyroscope noise                                                            | [3,] (Static)
           (Note that this is really just tracked for debugging purposes)
 """
-function gyro_measurement(x::STATE{T}; σ_scale = 0.05) where {T}
+function gyro_measurement(x::STATE{T}; σ = 1.22e-4) where {T}
 
-    ηω = rand(Normal(0.0, σ_scale), 3)  # Noise scales with actual value
+    ηω = rand(Normal(0.0, σ), 3)  
 
     ω̃  = x.ω .+ x.β .+ ηω
 
@@ -149,7 +151,7 @@ end
       - ηr: Position noise                                                             | [3,] (Static)
           (Note that this is really just tracked for debugging purposes)
 """
-function pos_measurement(x::STATE; σ = 1e4)
+function pos_measurement(x::STATE; σ = 2e4)
 
     ηr = SVector{3, Float64}(rand(Normal(0.0, σ), 3))
     r̃ = x.r + ηr
@@ -209,10 +211,10 @@ end
               (Note that this is really just tracked for debugging purposes)
 """  
 function diode_measurement(sat::SATELLITE{N, T}, alb::ALBEDO, x::STATE{T}, ecl::Real, sᴵ::SVector{3, T}, sᴮ::SVector{3, T}; 
-                            σ_scale = 0.05, E_am₀ = 1366.9, use_albedo = true)::Tuple{SVector{N, T}, SVector{N, T}, SVector{N, T}} where {N, T}
+                            σ = 0.01, E_am₀ = 1366.9, use_albedo = true)::Tuple{SVector{N, T}, SVector{N, T}, SVector{N, T}} where {N, T}
 
     if (ecl < 0.001)   # No need to waste time calculating in eclipse - I = 0, Ĩ is just noise
-        η = SVector{N, T}(rand(Normal(0.0, σ_scale * 0.002), N))
+        η = SVector{N, T}(rand(Normal(0.0, σ), N))
         return SVector{N, T}(zeros(N)), η, η
     else 
 
@@ -233,7 +235,7 @@ function diode_measurement(sat::SATELLITE{N, T}, alb::ALBEDO, x::STATE{T}, ecl::
             # Calculate current, including noise and Earth's albedo 
             current = C[i] * (dot(surface_normal, sᴮ) + (diode_albedo / E_am₀) )
             current *= ecl
-            η = rand(Normal(0.0, abs(σ_scale * current)))
+            η = rand(Normal(0.0, σ))
 
             # Photodiodes don't generate negative current
             I[i] = (current < 1e-8) ? 0.0 : current 

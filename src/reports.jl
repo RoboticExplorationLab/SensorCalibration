@@ -229,8 +229,8 @@ function monte_carlo(N = 10)
     es₀s, eB₀s    = zeros(N), zeros(N)
     for i = 1:N
         println("\n---------  $i --------")
-        # results = main(; verbose = false, num_orbits = 1.5, initial_state = diode_cal, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0);
-        results = main(; verbose = false)
+        results = main(; initial_mode = diode_cal, verbose = false, num_orbits = 3.0)
+
         eq = mekf_report(results; verbose = false)
         es₀, es = evaluate_diode_cal(results; verbose = false)
         eB₀, eB = evaluate_mag_cal(results; verbose = false)
@@ -241,5 +241,81 @@ function monte_carlo(N = 10)
         eB₀s[i] = eB₀
     end
 
+
+    sDiff = (ess - es₀s);
+    bDiff = (eBs - eB₀s);
+    μsf, σsf = round(mean(ess), digits = 2),   round(std(ess), digits = 2);
+    μs0, σs0 = round(mean(es₀s), digits = 2),  round(std(es₀s), digits = 2);
+    μsd, σsd = round(mean(sDiff), digits = 2), round(std(sDiff), digits = 2);
+    μbf, σbf = round(mean(eBs), digits = 2),   round(std(eBs), digits = 2);
+    μb0, σb0 = round(mean(eB₀s), digits = 2),  round(std(eB₀s), digits = 2);
+    μbd, σbd = round(mean(bDiff), digits = 2), round(std(bDiff), digits = 2);
+    μϕ, σϕ   = round(mean(eqs), digits = 3), round(std(eqs), digits = 3);
+
+    header  = (["Vector", "Initial", "Final", "Difference (fin - init)"], ["N = $N", "μ° (σ°)", "μ° (σ°)", "μ (σ)"]);
+    vectors = ["Sun", "Mag", "Attitude"];
+    inits   = ["$μs0 ($σs0)", "$μb0 ($σb0)", "-----"];
+    finals  = ["$μsf ($σsf)", "$μbf ($σbf)", "$μϕ ($σϕ)"];
+    diffs   = ["$μsd ($σsd)", "$μbd ($σbd)", "-----"];
+    data    = hcat(vectors, inits, finals, diffs);
+    display(pretty_table(data; header = header, header_crayon = crayon"yellow bold"));
+
     return eqs, ess, eBs, es₀s, eB₀s
+end
+
+function diode_self_consistency(results, t::Symbol = :a; start = 1, stop = nothing, ds = 1, kwargs...)
+    sat_true, est_hist = results[:sat_truth], results[:sat_ests];
+    N = size(est_hist, 1)
+    Nd = 6
+
+    function wrap(diff; radians = true)
+
+        offset = (radians) ? pi : 180
+        while diff > offset 
+            diff -= 2 * offset 
+        end
+
+        while diff < -offset 
+            diff += 2 * offset 
+        end
+
+        return diff
+    end
+
+    
+    C_err, α_err, ϵ_err = zeros(N, Nd), zeros(N, Nd), zeros(N, Nd);
+    σC, σα, σϵ = zeros(N, Nd), zeros(N, Nd), zeros(N, Nd);
+    Cs, αs, ϵs = sat_true.diodes.calib_values, sat_true.diodes.azi_angles, sat_true.diodes.elev_angles;
+
+    for i = 1:N
+        C_err[i, :] .= Cs .- est_hist[i].diodes.calib_values;
+        α_err[i, :] .= wrap.( αs - est_hist[i].diodes.azi_angles);
+        ϵ_err[i, :] .= wrap.( ϵs - est_hist[i].diodes.elev_angles);
+
+        # NO sqrt. because it is already a square root KF (but keep abs)
+        Σchol = est_hist[i].covariance 
+        Σ = Σchol' * Σchol 
+
+        σC[i, :] .= sqrt.(diag(Σ[7:12, 7:12]))  #abs.(diag(est_hist[i].covariance[16:21, 16:21]));
+        σα[i, :] .= sqrt.(diag(Σ[13:18, 13:18]))  #abs.(diag(est_hist[i].covariance[22:27, 22:27]));
+        σϵ[i, :] .= sqrt.(diag(Σ[19:24, 19:24]))  #abs.(diag(est_hist[i].covariance[28:33, 28:33]));
+    end
+
+    plot(C_err, title = "Error - Scale Factors", xlabel = "Index", ylabel = "Value", layout = 6);
+    plot!(      3 * σC, c = :red, layout = 6, label = "3σ");
+    pC = plot!(-3 * σC, c = :red, layout = 6, label = false)
+
+    plot(rad2deg.(α_err), title = "Error - Azimuth Angles",   xlabel = "Index", ylabel = "Value", layout = 6);
+    plot!(      3 * rad2deg.(σα), c = :red, layout = 6, label = "3σ");
+    pα = plot!(-3 * rad2deg.(σα), c = :red, layout = 6, label = false)
+
+    plot(rad2deg.(ϵ_err), title = "Error - Elevation Angles", xlabel = "Index", ylabel = "Value", layout = 6);
+    plot!(      3 * rad2deg.(σϵ), c = :red, layout = 6, label = "3σ");
+    pϵ = plot!(-3 * rad2deg.(σϵ), c = :red, layout = 6, label = false)
+
+    display(plot(pC))
+    display(plot(pα))
+    display(plot(pϵ))
+
+    return nothing
 end

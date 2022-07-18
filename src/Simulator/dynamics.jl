@@ -15,7 +15,7 @@
     dynamics(J, x, u, t; Rₑ, σβ)
       
     Propagates the state dynamics for a satellite, where the state is (probably) defined 
-    as [position, velocity, scalar-first quaternion, angular velocity, gyro bias]
+    as [position (m), velocity (m/s), scalar-first quaternion, angular velocity (rad/s), gyro bias (rad)]
       `x = [r⃗, v⃗, (q₀, q⃗), ω, β]`
 
     Includes gravity from spherical harmonics, uniform drag, SRP, and third body 
@@ -33,7 +33,7 @@
     Returns:
       - x:   updated STATE struct                                     |  STATE
 """
-function dynamics(J::SMatrix{3, 3, T, 9}, x::STATE{T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = 3.14e-5, kwargs...) where {T}
+function dynamics(J::SMatrix{3, 3, T, 9}, x::STATE{T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = 1.45e-5, kwargs...) where {T}
 
     if norm(x.r) < Rₑ                  
         error("ERROR: Impact at time $t")
@@ -50,7 +50,7 @@ end
 
 
 """ Alternate function call that uses an array for state rather than a struct """
-function dynamics(J::SMatrix{3, 3, T, 9}, x::SVector{N, T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = 3.14e-5, kwargs...)::SVector{16, T} where {N, T}
+function dynamics(J::SMatrix{3, 3, T, 9}, x::SVector{N, T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = 1.45e-5, kwargs...)::SVector{16, T} where {N, T}
 
     if norm(@view x[1:3]) < Rₑ                  
         error("ERROR: Impact at time $t")
