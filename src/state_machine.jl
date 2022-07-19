@@ -3,6 +3,7 @@
 """ TO DO
  - Split by typeof(data)? 
  - Values for opt args
+ - Sun vector does not subtract out albedo, because it is slow and not that helpful 
 """
 
 # Given a state, generate measurements. Estimate/Control. Generate and return next step (maybe flip that to be first?)
@@ -103,7 +104,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
         elseif !flags.diodes_calibrated && (norm(sensors.gyro) < initial_detumble_thresh)
             flags.init_detumble  = true 
 
-            if !(flags.in_sun)
+            if false # !(flags.in_sun)
                 next_mode = chill
             else
                 next_mode = mag_cal 

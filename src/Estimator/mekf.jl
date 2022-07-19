@@ -5,8 +5,6 @@
  - A (in prediction) does not appear to be correct..., and maybe Hb and Hi, too
  - current_measurement is slow (~ ms)
 
- - Read up on IMU stuff to get a fill for the noise W and V (I have no idea..) 
- - Read up on setting initial covariances too
 """
 
 """

@@ -3,6 +3,7 @@
 """ TO Do 
  - Make it not static 
  - Easy way to update sat by state (STATE and SAT_STATE)
+ - in README, add example function calls
 
  - Make this a module, return a dict from main, etc... (include state_machine)
 """
@@ -71,8 +72,8 @@ function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true
         x₀, T_orbit = get_initial_state(; detumbled = true)
         flags = FLAGS(; init_detumble = true, mag_cal = true, dio_cal = true, final_detumble = true)
         sat_truth = SATELLITE(; sta =  SAT_STATE(; q = x₀.q, β = x₀.β))
-        sat_est   = SATELLITE(; J = sat_truth.J, mag = sat_truth.magnetometer, dio = sat_truth.diodes, sta = SAT_STATE(; ideal = true))
-        # sat_est = SATELLITE(; J = sat_truth.J, mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true), sta = SAT_STATE(; ideal = true))
+        # sat_est   = SATELLITE(; J = sat_truth.J, mag = sat_truth.magnetometer, dio = sat_truth.diodes, sta = SAT_STATE(; ideal = true))
+        sat_est = SATELLITE(; J = sat_truth.J, mag = MAGNETOMETER(; ideal = true), dio = DIODES(; ideal = true), sta = SAT_STATE(; ideal = true))
         op_mode = chill;      # Will switch over after first iteration
 
     else
@@ -253,7 +254,7 @@ end;
 
 # @info "No Noise!"; results = main(; num_orbits = 4, initial_mode = detumble, use_albedo = false, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
 # @info "Partial Noise!"; results = main(; num_orbits = 1.25, initial_mode = mag_cal, σB = deg2rad(0.00), σ_current = 0.00);
-@info "Full Noise!"; results = main(; initial_mode = mekf, num_orbits = 0.25, use_albedo = true); 
+@info "Full Noise!"; results = main(; initial_mode = mag_cal, num_orbits = 3.0, use_albedo = true); 
 # sat_truth, sat_est, truths, sensors, ecls, noises, states, sat_ests, op_modes 
 
 # display(plot(results[:states]))
@@ -265,6 +266,6 @@ end;
 # Random.seed!(1000)
 # @info "Full Noise!"; results = main(; initial_mode = diode_cal, num_orbits = 0.03, use_albedo = true); 
 # diode_self_consistency(results)
-
+# eqs, ess, eBs, es₀s, eB₀s = monte_carlo(20)
 
 println("Done!");

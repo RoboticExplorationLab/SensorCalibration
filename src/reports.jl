@@ -140,6 +140,15 @@ end;
 detumbler_report(results; kwargs...) = detumbler_report(results[:states], results[:sensors]; kwargs...)
 
 function evaluate_diode_cal(sensors::Vector{SENSORS{6, T}}, truths::Vector{GROUND_TRUTH{6, T}}, d0::DIODES, df::DIODES; verbose = true) where {T}
+    # Deal with numerical errors 
+    r_acos(x) = (x ≈  1) ? zero(x)    : 
+                (x ≈ -1) ? one(x) * π : acos(x)
+
+    no_eclipse = [norm(sensors[i].diodes) > 0.1 for i = 1:size(sensors, 1)]
+
+    sensors = sensors[ no_eclipse ]; # Ignore eclipse
+    truths  = truths[  no_eclipse ]; 
+    
     N = size(truths, 1)
 
     ŝ0 = [estimate_sun_vector(sensors[i], d0) for i = 1:N]
@@ -229,7 +238,7 @@ function monte_carlo(N = 10)
     es₀s, eB₀s    = zeros(N), zeros(N)
     for i = 1:N
         println("\n---------  $i --------")
-        results = main(; initial_mode = diode_cal, verbose = false, num_orbits = 3.0)
+        results = main(; initial_mode = mag_cal, verbose = false, num_orbits = 3.0)
 
         eq = mekf_report(results; verbose = false)
         es₀, es = evaluate_diode_cal(results; verbose = false)
@@ -258,8 +267,13 @@ function monte_carlo(N = 10)
     finals  = ["$μsf ($σsf)", "$μbf ($σbf)", "$μϕ ($σϕ)"];
     diffs   = ["$μsd ($σsd)", "$μbd ($σbd)", "-----"];
     data    = hcat(vectors, inits, finals, diffs);
-    display(pretty_table(data; header = header, header_crayon = crayon"yellow bold"));
 
+    @show data
+    display(pretty_table(data))
+    display(pretty_table(data; header = header, header_crayon = crayon"yellow bold"));
+    
+
+    @infiltrate
     return eqs, ess, eBs, es₀s, eB₀s
 end
 
@@ -318,4 +332,93 @@ function diode_self_consistency(results, t::Symbol = :a; start = 1, stop = nothi
     display(plot(pϵ))
 
     return nothing
+end
+
+
+
+
+function figs_for_thesis(results)
+    r_acos(x) = (x ≈  1) ? zero(x)    : 
+                (x ≈ -1) ? one(x) * π : acos(x)
+
+
+    N = size(results[:states], 1);
+    sensors = results[:sensors]; 
+    truths  = results[:truths]; 
+    ests    = results[:sat_ests];
+    states  = results[:states];
+    modes = results[:modes];
+
+    #### Diode Cal 
+    ŝs = [estimate_sun_vector(sensors[i], ests[i].diodes) for i = 1:N];
+    sᴮ = [truths[i].ŝᴮ for i = 1:N];
+    es = [ rad2deg( r_acos(ŝs[i]' * sᴮ[i])) for i = 1:5:N];
+
+    idx = 3;
+    Cs = [results[:sat_ests][i].diodes.calib_values[idx] for i = 1:5:N];         # Down sample to make it in seconds
+    αs = [rad2deg(results[:sat_ests][i].diodes.azi_angles[idx])  for i = 1:5:N];
+    ϵs = [rad2deg(results[:sat_ests][i].diodes.elev_angles[idx]) for i = 1:5:N];
+
+    C₀, α₀, ϵ₀ = Cs[idx], αs[idx], ϵs[idx]
+    C, α, ϵ = results[:sat_truth].diodes.calib_values[idx], rad2deg(results[:sat_truth].diodes.azi_angles[idx]), rad2deg(results[:sat_truth].diodes.elev_angles[idx]);
+    mode_start = Int(minimum( findall(modes .== diode_cal)) / 5)
+
+    pc = plot(Cs[mode_start:end], title = "Scale Factor", label = "Estimate", ylabel = "Magnitude", xlabel = "Time (s)");  hline!([C₀], ls = :dot, c = :red, label = "Initial Guess"); hline!([C], ls = :dash, c = :green, label = "True Value", legend = false);
+    pa = plot(αs[mode_start:end], title = "Azimuth Angle", label = "Estimate", ylabel = "Angle (deg)", xlabel = "Time (s)");    hline!([α₀], ls = :dot, c = :red, label = "Initial Guess"); hline!([α], ls = :dash, c = :green, label = "True Value");
+    pe = plot(ϵs[mode_start:end], title = "Elevation Angle", label = "Estimate", ylabel = "Angle (deg)", xlabel = "Time (s)");  hline!([ϵ₀], ls = :dot, c = :red, label = "Initial Guess"); hline!([ϵ], ls = :dash, c = :green, label = "True Value", legend = false);
+    ps = plot(es[mode_start:end], title = "Estimation Error", label = "Sun Vector", ylabel = "Error (deg)", xlabel = "Time (s)");
+    cal_plot = plot(pc, pa, pe) 
+
+    ### MEKF 
+    qs = [states[i].q for i = 1:5:N]; qs = reduce(hcat, qs)'; 
+    βs = [states[i].β for i = 1:5:N]; βs = reduce(hcat, βs)';
+    q̂s = [ests[i].state.q for i = 1:5:N]; q̂s = reduce(hcat, q̂s)';
+    β̂s = [ests[i].state.β for i = 1:5:N]; β̂s = reduce(hcat, β̂s)';
+    mode_start =Int(minimum( findall(modes .== diode_cal)) / 5)
+
+    qErrs = [norm(cayley_map(qs[i, :], q̂s[i, :])) for i = 1:size(qs, 1)];
+    βErrs = [norm(βs[i, :] - β̂s[i, :]) for i = 1:size(βs, 1)];
+    qPlot = plot(qErrs[mode_start:end, :], title = "Attitude Error", ylabel = "Error Magnitude", label = false, c = :black, ls = :dash, ylim = (-1.0, 1.0), lw = 1);
+    plot( βs[mode_start:end, :], title = "MEKF Report: β", c = [:red :blue :green], label = ["x" "y" "z"]);
+    plot!(β̂s[mode_start:end, :], c = [:red :blue :green], ls = :dash, label = false);
+    βPlot = plot!(βErrs[mode_start:end], title = "Gyroscope Bias", xlabel = "Time (s)", ylabel = "Magnitude (rad/s)", label = "Error", c = :black, ls = :dot);
+
+    mekfPlot = plot(qPlot, βPlot, xlim = [1, 100], layout = (2, 1))
+
+    ### Magnetometer (hist)
+
+    B̂0 = [correct_magnetometer(ests[1],   sensors[i].magnetometer) for i = 1:N];
+    B̂f = [correct_magnetometer(ests[end], sensors[i].magnetometer) for i = 1:N];
+    Bᴮ = [truths[i].Bᴮ for i = 1:N];
+
+    # Only do this before magnetometer is calibrated!
+    B̂0 = B̂0[findall(modes .== mag_cal)]
+    B̂f = B̂f[findall(modes .== mag_cal)]
+    Bᴮ = Bᴮ[findall(modes .== mag_cal)]
+    Nb = size(Bᴮ, 1)
+
+    e0 = [ rad2deg( r_acos(normalize(B̂0[i])' * normalize(Bᴮ[i]))) for i = 1:Nb];
+    ef = [ rad2deg( r_acos(normalize(B̂f[i])' * normalize(Bᴮ[i]))) for i = 1:Nb];
+
+    μ0 = round(sum(e0) / Nb, digits = 2); μf = round(sum(ef) / Nb, digits = 2);
+    h0 = histogram(e0, normalize = :pdf, ylabel = "Frequency", xlabel = "Error (deg)", title = "Before Calibration", label = "μ = $μ0");
+    hf = histogram(ef, normalize = true, ylabel = "Frequency", xlabel = "Error (deg)", title = "After Calibration", label = "μ = $μf");
+    # hf = vline!([μ0], label = "Mean Pre-Calibration"); hf = vline!([μf], label = "Mean Post-Calibration")
+    mag_plot = plot(h0, hf, plot_title = "Magnetometer Calibration", layout = (2, 1))
+
+    ### Detumbling 
+    Nd = findall( (modes .== detumble) .== 0)[1]
+    ωs = [states[i].ω for i = 1:Nd]; ωs = reduce(hcat, ωs)';
+    ω̂s = [sensors[i].gyro for i = 1:Nd]; ω̂s = reduce(hcat, ω̂s)';
+    nω = [norm(ωs[i, :]) for i = 1:5:Nd];
+    nω̂ = [norm(ω̂s[i, :]) for i = 1:5:Nd];
+    τ₁ = 15 # deg2rad(15)
+    τ₂ = 5
+
+    plot(rad2deg.(nω̂ ), label = "Measured", title = "Gyroscope");
+    plot!(rad2deg.(nω), label = "Truth", xlabel = "Time (s)", ylabel = "Magnitude (deg/s)", ls = :dash);
+    hline!([τ₁], label = "Initial Detumble", ls = :dot, lw = 2, c = :gray);
+    det_plot = hline!([τ₂], label = "Final Detumble", ls = :dot, lw = 2, c = :gray);
+
+    return cal_plot, mag_plot, mekfPlot, det_plot
 end
