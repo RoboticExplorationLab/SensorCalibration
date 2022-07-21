@@ -49,7 +49,7 @@
 
 """
 function generate_measurements(sat::SATELLITE, alb::ALBEDO, x::STATE, t::Epoch, dt::T; 
-                                E_am₀ = 1366.9, σB = 0.3e-6, σ_gyro = 1.22e-4, 
+                                E_am₀ = 1366.9, σB = 0.3e-6, σ_gyro = 2.73e-4, 
                                 σr = 2e4, σ_current = 0.01, use_albedo = true) where {T}
 
     ᴮQᴵ = quat2rot(x.q)'  # Compute once and pass in 
@@ -93,7 +93,7 @@ end
       - `Bᴮ`: Magnetic field vector in body frame (noiseless)                                   | [3,] (SVector)
       - `B̃ᴮ`: Measured magnetic field vector in body frame (noisy, biased, and un-calibrated)   | [3,] (SVector)
 """
-function mag_measurement(sat::SATELLITE, x::STATE, ᴮQᴵ::SMatrix{3, 3, T, 9}, t::Epoch, dt::T; σ = 0.3e-6) where {T}
+function mag_measurement(sat::SATELLITE, x::STATE, ᴮQᴵ::SMatrix{3, 3, T, 9}, t::Epoch, dt::T; σ = 2.73e-4) where {T}
 
     Bᴵ = SVector{3, Float64}(IGRF13(x.r, t))   # Mag vector in inertial frame 
     Bᴮ = ᴮQᴵ * Bᴵ 
@@ -110,11 +110,12 @@ end
 
 """ 
     Generates the gyroscope measurement by adding noise to the true values.
+    Default noise is 0.007 deg/sec/sqrt(Hz), with an assumed rate of 5Hz
 
     Arguments: 
       - x:  struct containing current environment state                             |  STATE 
               (r  //  v  //  q  //  ω  //  β)
-      - σ_scale: (Opt) Scale that modifies magnitude of the gyroscope to get the 
+      - σ: (Opt) Scale that modifies magnitude of the gyroscope to get the 
               to get the stdev of the gyro noise, so that noise magnitude scales with 
               gyroscope magnitude.  ('σ_gyro_scale' in generate_measurements)       |  Scalar
 
@@ -125,7 +126,7 @@ end
       - ηw: Gyroscope noise                                                            | [3,] (Static)
           (Note that this is really just tracked for debugging purposes)
 """
-function gyro_measurement(x::STATE{T}; σ = 1.22e-4) where {T}
+function gyro_measurement(x::STATE{T}; σ = 0.01565) where {T}
 
     ηω = rand(Normal(0.0, σ), 3)  
 
