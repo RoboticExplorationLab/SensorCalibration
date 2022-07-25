@@ -1,4 +1,5 @@
 import numpy as np
+from numpy import sin, cos
 import pysofa2  # For testing
 
 # CONSTANTS
@@ -457,61 +458,23 @@ def polar_motion(epc):
 # NOTE - UNTESTED & simplified by only using z rotation
 def rECItoECEF(epc):
     """
-        Computes the combined rotation matrix from the inertial to the Earth-fixed
-        reference frame. Applies corrections for bias, precession, nutation,
-        Earth-rotation, and polar motion.
-
-        The transformation is accomplished using the IAU 2006/2000A, CIO-based 
-        theory using classical angles. The method as described in section 5.5 of 
-        the SOFA C transformation cookbook.
+        Computes the combined rotation matrix from the ECI (Earth Centered Inertial) to the ECEF (Earth-Centered Earth-Fixed)
+        reference frame. Applies correction for Earth-rotation.
 
         # Arguments
         - `epc::Epoch`: Epoch of transformation
 
         # Returns
-        - `r::Matrix{<:Real}`: 3x3 Rotation matrix transforming GCRF -> ITRF
+        - `r::Matrix{<:Real}`: 3x3 Rotation matrix transforming ECI -> ECEF
     """
-    # # rc2i = bias_precession_nutation(epc)
-    # r    = earth_rotation(epc)
-    # # rpm  = polar_motion(epc)
-    # return rpm * r * rc2i 
-
     # Based on Kevin's SpacecraftSim code 
     mjd_current = mjd(epc, tsys = "UTC")
-    theta = 1.0047517553493037 + 6.300387486754831*mjd_current
-
-    theta = wrap_to_2pi(theta)
-
-    ecef_Q_eci = myECItoECEF(theta)
-
-    return ecef_Q_eci
-
-def rotz(theta):
-    """Rotation matrix for rotation about the z axis"""
-    return np.array([ [ cos(theta),  sin(theta), 0],
-                      [-sin(theta),  cos(theta), 0],
-                      [          0,           0, 1]  ])
-
-def myECItoECEF(Era):
-    """ECI to ECEF rotation matrix.
-    Args:
-        seconds_from_9_1_2020_to_epoch: (s)
-        seconds_from_epoch: (s) will be time.monotonic()
-    Returns:
-        ECEF_Q_ECI: DCM
-    """
-    # t = seconds_from_9_1_2020_to_epoch + seconds_from_epoch
-    return rotz(Era)
-
-def wrap_to_2pi(val):
-    while (val > 2*np.pi):
-        val -= 2*np.pi 
-    
-    while (val < 0):
-        val += 2 * np.pi 
-
-    return val
-
+    theta = 1.0047517553493037 + 6.300387486754831 * mjd_current
+    theta = theta % (2 * np.pi)
+    # rotation 
+    return np.array([[cos(theta),   sin(theta), 0],
+                     [-sin(theta),  cos(theta), 0],
+                     [0,            0,          1]])
 
 
 ######################
