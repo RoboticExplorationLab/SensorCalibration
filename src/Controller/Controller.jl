@@ -3,7 +3,6 @@
 """ To Do:
 
     - Finish and test B-Dot controller 
-    - Verify optimal κ (Reread paper...?)
 
     - Optimal κ; do I compute it each time? Depends on orbital period, 
         inertia, and ≈inclination, so it should vary. But I don't track 
