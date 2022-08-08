@@ -3,10 +3,10 @@
 """
     To Do:
       Add:
-      - Add in drag, SRP that is dependent on orientation
+      - Add in drag, SRP that is dependent on orientation?
+      - Add in third body gravity from Jupiter?
 
       Fix/Update:
-      - Get accurate gyro bias values
       - Speed up accel_perturbations? (it is ≈50x slower than the rest combined)
 """
 
@@ -35,6 +35,7 @@
 """
 function dynamics(J::SMatrix{3, 3, T, 9}, x::STATE{T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = 1.45e-5, kwargs...) where {T}
 
+    # Check for impact
     if norm(x.r) < Rₑ                  
         error("ERROR: Impact at time $t")
     end
@@ -52,6 +53,7 @@ end
 """ Alternate function call that uses an array for state rather than a struct """
 function dynamics(J::SMatrix{3, 3, T, 9}, x::SVector{N, T}, u::SVector{3, T}, t::Epoch; Rₑ = 6378136.3, σβ = 1.45e-5, kwargs...)::SVector{16, T} where {N, T}
 
+    # Check for impact
     if norm(@view x[1:3]) < Rₑ                  
         error("ERROR: Impact at time $t")
     end
@@ -117,6 +119,7 @@ function accel_perturbations(epc::Epoch, r::Vector{T}, v::Vector{T} ;
 
     return SVector{3, T}(a)
 end
+
 
 """
     rk4(J, x, u, t, h)

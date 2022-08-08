@@ -4,3 +4,8 @@ This folder contains a simulator used to propogate state dynamics and generate t
 ## Simulator Module 
 This module exports 'rk4', the primary function for updating state, and 'generate_measurements', which takes in the state and generates 
 both idealized and noisy measurements.
+
+Example function calls:   
+``` next_state = rk4(inertia_matrix, state, control, time, time_step)```   
+``` truth, sensors, eclipse_factor, noise = generate_measurements(satellite_struct, albedo_struct, state, time, time_step)```   
+
