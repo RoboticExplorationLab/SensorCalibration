@@ -1,13 +1,11 @@
 # [src/state_machine.jl]
 
 """ TO DO
- - Split by typeof(data)? 
- - Values for opt args
- - Sun vector does not subtract out albedo, because it is slow and not that helpful 
+ - Triad does NOT factor in the Earth Albedo, because it is only used to initialize. Don't think this is a problem, but it could be worth testing
+ - Currently determine if sun is in eclipse by using a threshold. Could also gather data during mag cal and use an average or something instead
 """
 
-# Given a state, generate measurements. Estimate/Control. Generate and return next step (maybe flip that to be first?)
-#Consider splitting by typeof(data). Add in optional arguments.
+
 """ step(sat_truth, sat_est, alb, x, t, dt, op_mode, flags, idx, progress_bar, T_orbit, data; use_albedo, initial_detumble_thresh, final_detumble_thresh, mag_ds_rate, 
             calib_cov_thres, mekf_cov_thres, σβ, σB, σ_gyro, σr, σ_current)
 
@@ -39,34 +37,40 @@
       (Others are noise parameters, see respective functions)
       
     Returns: 
-
-
-
+      - `sat_truth`:  Updated true satellite, after one step in the simulator         |  SATELLITE 
+      - `sat_est`:    Current estimate of the satellite state and calibration params  |  SATELLITE 
+      - `x⁺`:         Updated environment step, after one step of the simulator       |  STATE
+      - `t`:          Current time                                                    |  Epoch 
+      - `next_mode`:  Flag to track next mode in the state machine                    |  Operation_mode 
+      - `data`:       Data structure needed for the next                              |  Struct, varies with state machine 
+      - `truth`:      Struct containing true system values. Used to verify system.    |  GROUND_TRUTH 
+      - `sensors`:    Struct containing sensor measurements, which are used in the algorithm.      |  SENSORS
+      - `ecl`:        Eclipse factor to track whether the satellite is illuminated                 |  Float64
+      - `noise:`      Struct containing noise values. Not really needed, just used for debugging   |  NOISE 
+      
 """
 function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}, t::Epoch, dt::Real, op_mode::Operation_mode, 
                 flags::FLAGS, idx::Int, progress_bar, T_orbit, data; use_albedo = true, initial_detumble_thresh = deg2rad(15), final_detumble_thresh = deg2rad(8),  # was 25, 10 deg
-                mag_ds_rate = 60, calib_cov_thres = 0.005, mekf_cov_thres = 0.004, σβ =1.45e-5, σB = 0.3e-6, σ_gyro = 1.22e-4, 
+                mag_ds_rate = 60, calib_cov_thres = 0.005, mekf_cov_thres = 0.004, σβ =1.45e-5, σB = 0.3e-6, σ_gyro = 2.73e-4, 
                 σr = 2e4, σ_current = 0.01) where {T}
 
     t += dt   # Update time
 
     ### Generate measurements
-
     truth, sensors, ecl, noise = generate_measurements(sat_truth, alb, x, t, dt; use_albedo = use_albedo, σB = σB, σ_gyro = σ_gyro, σr = σr, σ_current = σ_current);
 
 
     flags.magnetometer_calibrated && (sensors = correct_magnetometer(sat_est, sensors))  # Correct the magnetometer readings once it has been calibrated 
 
-    ##### MAYBE ACCUMULATE AVERAGES DURING MAG CAL AND USE DEVIATION FROM MEAN?????            
+
+    ##### MAYBE ACCUMULATE AVERAGES DURING MAG CAL AND USE DEVIATION FROM MEAN?      
     flags.in_sun = (flags.in_sun) ? norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.7 :
-                                    norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.8 
-    # flags.in_sun = ecl ### REMOVE !    
+                                    norm(sensors.diodes ./ sat_est.diodes.calib_values) > 0.8     
 
     ### Estimate & Control 
     next_mode = op_mode
-    u = SVector{3, T}(zeros(3))
-    notes = ""
-
+    u = SVector{3, T}(zeros(3))   # Control. Usually zero, except during detumbling 
+    notes = ""    
 
 
     if op_mode == detumble      # -> mag_cal, mekf
@@ -119,6 +123,8 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
         notes = "Mode: $op_mode\t||̂ω||: $(norm(rad2deg.(sensors.gyro))) \t ||ω||: $(norm(rad2deg.(x.ω)))"
 
 
+
+
     elseif op_mode == mag_cal   # -> chill, diode_cal 
         """ mag_cal -> chill, diode_cal 
 
@@ -149,7 +155,6 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
                     data = MEKF_DATA()
                     reset_cov!(sat_est; reset_calibration = true)
                     q = run_triad(sensors, sat_est, t, flags.in_sun)
-                    # q = x.q; @info "Using true q in mag cal!"
                     sat_est = SATELLITE(sat_est.J, sat_est.magnetometer, sat_est.diodes, update_state(sat_est.state; q = q), sat_est.covariance)
 
                 end
@@ -159,8 +164,8 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
 
 
 
-    elseif op_mode == chill     # -> diode_cal, (mekf?)
-        """ chill -> diode_cal 
+    elseif op_mode == chill     # -> diode_cal, mekf
+        """ chill -> diode_cal, mekf
 
             Temporary mode that is used as a waiting zone until something happens. 
             Right now, this is only called when diodes are being calibrated but 
@@ -262,6 +267,7 @@ function step(sat_truth::SATELLITE, sat_est::SATELLITE, alb::ALBEDO, x::STATE{T}
     return sat_truth, sat_est, x⁺, t, next_mode, data, truth, sensors, ecl, noise
 end
 
+
 """ run_triad(sensors, sat_est, t, in_sun)
 
       Uses the current time and sensor measurements to estimate the 
@@ -346,7 +352,7 @@ function estimate_sun_vector(sens::SENSORS{N, T}, diodes::DIODES{N, T}; sᴮ_tru
     end
 end
 
-# Has some error... because of albedo? 
+""" Doesn't work as well, but doesn't need to have 3+ diodes illuminated"""
 function estimate_sun_vector_pinv(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
     # n(α, ϵ) = [sin(pi/2 - ϵ)*cos(α); sin(pi/2 - ϵ) * sin(α); cos(pi/2 - ϵ)]
     n(α, ϵ) = [cos(ϵ) * cos(α); cos(ϵ) * sin(α); sin(ϵ)]
@@ -389,54 +395,6 @@ function estimate_sun(sens, diodes)
 end
 
 
-# The Pseudo-inv method would probably be sketchy IRL because when the sun isn't illuminating 3+ diodes it would fail
-# This method does not rely on knowledge of photodiode setup in advance
-# Also, even with perfect estimates for the diode parameters this still gets ~2* error
-function estimate_sun_vector_old2(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
-    n(α, ϵ) = [sin(pi/2 - ϵ)*cos(α); sin(pi/2 - ϵ) * sin(α); cos(pi/2 - ϵ)]
-
-    Ĩ    = sens.diodes ./ diodes.calib_values 
-    azi  = diodes.azi_angles
-    elev = diodes.elev_angles 
-    
-    ns = zeros(eltype(Ĩ),  6, 3) 
-    for i = 1:6 
-        ns[i, :] .= n(azi[i], elev[i])
-    end 
-
-    ŝ = (ns' * ns) \ (ns' * Ĩ)
-    return ŝ / norm(ŝ)
-end
-
-function estimate_sun_vector2(sens::SENSORS{N, T}, diodes::DIODES{N, T}) where {N, T}
-
-    sph2cart(α, ϵ, ρ) = [ρ * sin(pi/2 - ϵ)*cos(α); ρ * sin(pi/2 - ϵ) * sin(α); ρ * cos(pi/2 - ϵ)]
-    
-    sx, sy, sz = 0.0, 0.0, 0.0
-    θ = deg2rad(-45)
-    Ry = [cos(θ)  0  -sin(θ);
-           0      1    0   ;
-          sin(θ)  0   cos(θ)]
-
-    _, _, z = sph2cart(diodes.azi_angles[1], diodes.elev_angles[1],  Ry * (sens.diodes[1] / diodes.calib_values[1]))    
-    sz += z
-    _, _, z = sph2cart(diodes.azi_angles[2], diodes.elev_angles[2],  Ry * (sens.diodes[2] / diodes.calib_values[2]))    
-    sz += z
-
-    _, y, _ = sph2cart(diodes.azi_angles[3], diodes.elev_angles[3],   sens.diodes[3] / diodes.calib_values[3])    
-    sy += y
-    _, y, _ = sph2cart(diodes.azi_angles[4], diodes.elev_angles[4],   sens.diodes[4] / diodes.calib_values[4])
-    sy += y
-
-    x, _, _ = sph2cart(diodes.azi_angles[5], diodes.elev_angles[5],  Ry * (sens.diodes[5] / diodes.calib_values[5]))    
-    sx += x
-    x, _, _ = sph2cart(diodes.azi_angles[6], diodes.elev_angles[6],  Ry * (sens.diodes[6] / diodes.calib_values[6]))    
-    sx += x
-
-
-    ŝᴮ = [sx, sy, sz]
-    return SVector{3, T}(ŝᴮ / norm(ŝᴮ))
-end
 
 function estimate_sun_vector_old(sens::SENSORS{N, T}, sat_est::SATELLITE) where {N, T}
     """ Estimates a (unit) sun vector using the diode measurements 

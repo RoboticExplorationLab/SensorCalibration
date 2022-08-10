@@ -1,6 +1,13 @@
 # [src/quaternions.jl] 
 
+""" Utility functions for working with quaternions. In an effort to be fast, there are a large number of multiple dispatch functions """
+
+""" To Do:
+ - 
+"""
+
 """ Common functions used when working with quaternions (assumes scalar first!) """
+
 
 using LinearAlgebra   # For identity matrix 
 
@@ -251,7 +258,13 @@ function rot2quat(R)
 
     return q
 end
+  
+""" 
+    Cayley map is a convenient approximation of the error between two quaternions. 
 
+    The magnitude of the Cayley map is about one half of the radians, but for angles under 10-15 degrees
+    (more robust would be to use a quaternion logrithm)
+"""
 function cayley_map(q₁, q₂)
     qₑ = L(q₁)' * q₂
     e  =  (qₑ[2:4] / qₑ[1])

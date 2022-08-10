@@ -95,22 +95,28 @@ diode_calibration_report(results::NamedTuple) = diode_calibration_report(results
 
 function mekf_report(states::Vector{STATE{T}}, est_hist::Vector{SATELLITE{6, T}}; verbose = true) where {T}
     N = size(states, 1)
-    qs = [states[i].q for i = 1:N]; qs = reduce(hcat, qs)'; 
-    βs = [states[i].β for i = 1:N]; βs = reduce(hcat, βs)';
-    q̂s = [est_hist[i].state.q for i = 1:N]; q̂s = reduce(hcat, q̂s)';
-    β̂s = [est_hist[i].state.β for i = 1:N]; β̂s = reduce(hcat, β̂s)';
+    qs = [states[i].q for i = 1:5:N]; qs = reduce(hcat, qs)'; 
+    βs = [states[i].β for i = 1:5:N]; βs = reduce(hcat, βs)';
+    q̂s = [est_hist[i].state.q for i = 1:5:N]; q̂s = reduce(hcat, q̂s)';
+    β̂s = [est_hist[i].state.β for i = 1:5:N]; β̂s = reduce(hcat, β̂s)';
+    N = size(qs, 1)
 
-    qErrs = [norm(cayley_map(qs[i, :], q̂s[i, :])) for i = 1:N];
+    # Cayley map ≈ 1/2 of the error, in radians, as long as it is small (~10-15 deg)
+    qErrs = [rad2deg(2 * norm(cayley_map(qs[i, :], q̂s[i, :]))) for i = 1:N];
     βErrs = [norm(βs[i, :] - β̂s[i, :]) for i = 1:N];
+
+    if maximum(qErrs) > 15
+        @warn "Quaternion error is large, Cayley map may not be very accurate"
+    end
 
     if verbose
         plot( qs, title = "MEKF Report: q", c = [:red :orange :blue :green]);
         plot!(q̂s, c = [:red :orange :blue :green], ls = :dash, label = false);
-        display( plot!(qErrs, label = false, c = :black, ls = :dot, ylim = (-1.5, 1.5), lw = 2) )
+        display( plot!(qErrs, label = false, ylabel = "Error (deg)", c = :black, ls = :dot, ylim = (-1.5, 1.5), lw = 2) )
 
         plot( βs, title = "MEKF Report: β", c = [:red :blue :green]);
         plot!(β̂s, c = [:red :blue :green], ls = :dash, label = false);
-        display( plot!(βErrs, label = false, c = :black, ls = :dot) )
+        display( plot!(βErrs, xlabel = "Time (s)", ylabel = "Bias (rad/s)", label = "Error", c = :black, ls = :dot) )
     end
     # return qs, q̂s, βs, β̂s
 
@@ -168,12 +174,12 @@ function evaluate_diode_cal(sensors::Vector{SENSORS{6, T}}, truths::Vector{GROUN
     μf = round(sum(ef) / size(ef, 1), digits = 3); σf = round(std(ef), digits = 3)
 
     if verbose
-        histogram(e0, title = "Initial Error (sᴮ)", xlabel = "Err (deg)", ylabel = "Frequency", label = false);
+        pe0 = histogram(e0, title = "Initial Error (sᴮ)", bins = 0:20, normalize = true, xlabel = "Err (deg)", ylabel = "Frequency", label = "μ = $(μ0)°");
         hline!([0 ], label = "σ0 = $σ0");
         vline!([μ0], label = "μ0 = $μ0");
         pe0 = vline!([μf], ls = :dash, label = "(μf = $μf)");
 
-        histogram(ef, title = "Final Error (sᴮ)", xlabel = "Err (deg)", ylabel = "Frequency", label = false);
+        pef = histogram(ef, title = "Final Error (sᴮ)", bins = 0:20, normalize = true, xlabel = "Err (deg)", ylabel = "Frequency", label = "μ = $(μf)°");
         hline!([0 ], label = "σf = $σf");
         vline!([μf], label = "μf = $μf");
         pef = vline!([μ0], ls = :dash, label = "(μ0 = $μ0)");
@@ -238,7 +244,7 @@ function monte_carlo(N = 10)
     es₀s, eB₀s    = zeros(N), zeros(N)
     for i = 1:N
         println("\n---------  $i --------")
-        results = main(; initial_mode = mag_cal, verbose = false, num_orbits = 3.0)
+        results = main(; initial_mode = mekf, verbose = false, num_orbits = 1.0)  # mekf + 1 orbit + force mag_cal
 
         eq = mekf_report(results; verbose = false)
         es₀, es = evaluate_diode_cal(results; verbose = false)
@@ -261,7 +267,7 @@ function monte_carlo(N = 10)
     μbd, σbd = round(mean(bDiff), digits = 2), round(std(bDiff), digits = 2);
     μϕ, σϕ   = round(mean(eqs), digits = 3), round(std(eqs), digits = 3);
 
-    header  = (["Vector", "Initial", "Final", "Difference (fin - init)"], ["N = $N", "μ° (σ°)", "μ° (σ°)", "μ (σ)"]);
+    header  = (["Vector", "Initial", "Final", "Difference (fin - init)"], ["N = $N", "μ° (σ°)", "μ° (σ°)", "μ° (σ°)"]);
     vectors = ["Sun", "Mag", "Attitude"];
     inits   = ["$μs0 ($σs0)", "$μb0 ($σb0)", "-----"];
     finals  = ["$μsf ($σsf)", "$μbf ($σbf)", "$μϕ ($σϕ)"];
@@ -334,91 +340,38 @@ function diode_self_consistency(results, t::Symbol = :a; start = 1, stop = nothi
     return nothing
 end
 
+function cal_gif(sat_true::SATELLITE, est_hist::Vector{SATELLITE{6, T}}) where {T} 
+    N = Int(floor(size(est_hist, 1) / 5))
+    C_est, α_est, ϵ_est = zeros(6, N), zeros(6, N), zeros(6, N)
 
+    for i = 1:N
+        C_est[:, i] = est_hist[5 * i + 4].diodes.calib_values
+        α_est[:, i] = rad2deg.(est_hist[5 * i + 4].diodes.azi_angles)
+        ϵ_est[:, i] = rad2deg.(est_hist[5 * i + 4].diodes.elev_angles)
+    end
+    
+    C₀, α₀, ϵ₀ = est_hist[1].diodes.calib_values, rad2deg.(est_hist[1].diodes.azi_angles), rad2deg.(est_hist[1].diodes.elev_angles)
+    Cf, αf, ϵf = est_hist[N].diodes.calib_values, rad2deg.(est_hist[N].diodes.azi_angles), rad2deg.(est_hist[N].diodes.elev_angles)
+    C, α, ϵ = sat_true.diodes.calib_values, rad2deg.(sat_true.diodes.azi_angles), rad2deg.(sat_true.diodes.elev_angles)
 
+    idx = 1
+    p1 = hline([C₀[idx]], title = "Scale Factor",  c = :red, label = false, ls = :dot); p1 = hline!([C[idx]], c = :green, label = false, ls = :dash);
+    p1 = @gif for i = 1:400 #N
+         plot!(C_est[idx, 1:i], xlim = [0, 400], label = false, c = :blue, ylim = [C[idx] - C_off, C[idx] + C_off])
+        # p2 = plot!(α_est[idx, 1:i], xlim = [0, 400], label = false, c = :blue, ylim = [α[idx] - α_off, α[idx] + α_off])
+    end every 10;
 
-function figs_for_thesis(results)
-    r_acos(x) = (x ≈  1) ? zero(x)    : 
-                (x ≈ -1) ? one(x) * π : acos(x)
+    p2 = hline([α₀[idx]], title = "Azimuth Angle", c = :red, label = false, ls = :dot); p2 = hline!([α[idx]], c = :green, label = false, ls = :dash);
+    p2 = @gif for i = 1:400 #N
+        # plot!(C_est[idx, 1:i], xlim = [0, 400], label = false, c = :blue, ylim = [C[idx] - C_off, C[idx] + C_off])
+       plot!(α_est[idx, 1:i], xlim = [0, 400], label = false, c = :blue, ylim = [α[idx] - α_off, α[idx] + α_off])
+    end every 10;
 
+    p3 = hline([α₀[idx]], title = "Elevation Angle", c = :red, label = false, ls = :dot); p3 = hline!([ϵ[idx]], c = :green, label = false, ls = :dash);
+    p3 = @gif for i = 1:400 #N
+        # plot!(C_est[idx, 1:i], xlim = [0, 400], label = false, c = :blue, ylim = [C[idx] - C_off, C[idx] + C_off])
+       plot!(ϵ_est[idx, 1:i], xlim = [0, 400], label = false, c = :blue, ylim = [ϵ[idx] - ϵ_off, ϵ[idx] + ϵ_off])
+    end every 10;
 
-    N = size(results[:states], 1);
-    sensors = results[:sensors]; 
-    truths  = results[:truths]; 
-    ests    = results[:sat_ests];
-    states  = results[:states];
-    modes = results[:modes];
-
-    #### Diode Cal 
-    ŝs = [estimate_sun_vector(sensors[i], ests[i].diodes) for i = 1:N];
-    sᴮ = [truths[i].ŝᴮ for i = 1:N];
-    es = [ rad2deg( r_acos(ŝs[i]' * sᴮ[i])) for i = 1:5:N];
-
-    idx = 3;
-    Cs = [results[:sat_ests][i].diodes.calib_values[idx] for i = 1:5:N];         # Down sample to make it in seconds
-    αs = [rad2deg(results[:sat_ests][i].diodes.azi_angles[idx])  for i = 1:5:N];
-    ϵs = [rad2deg(results[:sat_ests][i].diodes.elev_angles[idx]) for i = 1:5:N];
-
-    C₀, α₀, ϵ₀ = Cs[idx], αs[idx], ϵs[idx]
-    C, α, ϵ = results[:sat_truth].diodes.calib_values[idx], rad2deg(results[:sat_truth].diodes.azi_angles[idx]), rad2deg(results[:sat_truth].diodes.elev_angles[idx]);
-    mode_start = Int(minimum( findall(modes .== diode_cal)) / 5)
-
-    pc = plot(Cs[mode_start:end], title = "Scale Factor", label = "Estimate", ylabel = "Magnitude", xlabel = "Time (s)");  hline!([C₀], ls = :dot, c = :red, label = "Initial Guess"); hline!([C], ls = :dash, c = :green, label = "True Value", legend = false);
-    pa = plot(αs[mode_start:end], title = "Azimuth Angle", label = "Estimate", ylabel = "Angle (deg)", xlabel = "Time (s)");    hline!([α₀], ls = :dot, c = :red, label = "Initial Guess"); hline!([α], ls = :dash, c = :green, label = "True Value");
-    pe = plot(ϵs[mode_start:end], title = "Elevation Angle", label = "Estimate", ylabel = "Angle (deg)", xlabel = "Time (s)");  hline!([ϵ₀], ls = :dot, c = :red, label = "Initial Guess"); hline!([ϵ], ls = :dash, c = :green, label = "True Value", legend = false);
-    ps = plot(es[mode_start:end], title = "Estimation Error", label = "Sun Vector", ylabel = "Error (deg)", xlabel = "Time (s)");
-    cal_plot = plot(pc, pa, pe) 
-
-    ### MEKF 
-    qs = [states[i].q for i = 1:5:N]; qs = reduce(hcat, qs)'; 
-    βs = [states[i].β for i = 1:5:N]; βs = reduce(hcat, βs)';
-    q̂s = [ests[i].state.q for i = 1:5:N]; q̂s = reduce(hcat, q̂s)';
-    β̂s = [ests[i].state.β for i = 1:5:N]; β̂s = reduce(hcat, β̂s)';
-    mode_start =Int(minimum( findall(modes .== diode_cal)) / 5)
-
-    qErrs = [norm(cayley_map(qs[i, :], q̂s[i, :])) for i = 1:size(qs, 1)];
-    βErrs = [norm(βs[i, :] - β̂s[i, :]) for i = 1:size(βs, 1)];
-    qPlot = plot(qErrs[mode_start:end, :], title = "Attitude Error", ylabel = "Error Magnitude", label = false, c = :black, ls = :dash, ylim = (-1.0, 1.0), lw = 1);
-    plot( βs[mode_start:end, :], title = "MEKF Report: β", c = [:red :blue :green], label = ["x" "y" "z"]);
-    plot!(β̂s[mode_start:end, :], c = [:red :blue :green], ls = :dash, label = false);
-    βPlot = plot!(βErrs[mode_start:end], title = "Gyroscope Bias", xlabel = "Time (s)", ylabel = "Magnitude (rad/s)", label = "Error", c = :black, ls = :dot);
-
-    mekfPlot = plot(qPlot, βPlot, xlim = [1, 100], layout = (2, 1))
-
-    ### Magnetometer (hist)
-
-    B̂0 = [correct_magnetometer(ests[1],   sensors[i].magnetometer) for i = 1:N];
-    B̂f = [correct_magnetometer(ests[end], sensors[i].magnetometer) for i = 1:N];
-    Bᴮ = [truths[i].Bᴮ for i = 1:N];
-
-    # Only do this before magnetometer is calibrated!
-    B̂0 = B̂0[findall(modes .== mag_cal)]
-    B̂f = B̂f[findall(modes .== mag_cal)]
-    Bᴮ = Bᴮ[findall(modes .== mag_cal)]
-    Nb = size(Bᴮ, 1)
-
-    e0 = [ rad2deg( r_acos(normalize(B̂0[i])' * normalize(Bᴮ[i]))) for i = 1:Nb];
-    ef = [ rad2deg( r_acos(normalize(B̂f[i])' * normalize(Bᴮ[i]))) for i = 1:Nb];
-
-    μ0 = round(sum(e0) / Nb, digits = 2); μf = round(sum(ef) / Nb, digits = 2);
-    h0 = histogram(e0, normalize = :pdf, ylabel = "Frequency", xlabel = "Error (deg)", title = "Before Calibration", label = "μ = $μ0");
-    hf = histogram(ef, normalize = true, ylabel = "Frequency", xlabel = "Error (deg)", title = "After Calibration", label = "μ = $μf");
-    # hf = vline!([μ0], label = "Mean Pre-Calibration"); hf = vline!([μf], label = "Mean Post-Calibration")
-    mag_plot = plot(h0, hf, plot_title = "Magnetometer Calibration", layout = (2, 1))
-
-    ### Detumbling 
-    Nd = findall( (modes .== detumble) .== 0)[1]
-    ωs = [states[i].ω for i = 1:Nd]; ωs = reduce(hcat, ωs)';
-    ω̂s = [sensors[i].gyro for i = 1:Nd]; ω̂s = reduce(hcat, ω̂s)';
-    nω = [norm(ωs[i, :]) for i = 1:5:Nd];
-    nω̂ = [norm(ω̂s[i, :]) for i = 1:5:Nd];
-    τ₁ = 15 # deg2rad(15)
-    τ₂ = 5
-
-    plot(rad2deg.(nω̂ ), label = "Measured", title = "Gyroscope");
-    plot!(rad2deg.(nω), label = "Truth", xlabel = "Time (s)", ylabel = "Magnitude (deg/s)", ls = :dash);
-    hline!([τ₁], label = "Initial Detumble", ls = :dot, lw = 2, c = :gray);
-    det_plot = hline!([τ₂], label = "Final Detumble", ls = :dot, lw = 2, c = :gray);
-
-    return cal_plot, mag_plot, mekfPlot, det_plot
-end
+    return p1, p2, p3
+end;

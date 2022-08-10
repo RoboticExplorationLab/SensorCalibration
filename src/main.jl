@@ -1,11 +1,12 @@
 # [src/MissionSim/main.jl]
 
 """ TO Do 
- - Make it not static 
- - Easy way to update sat by state (STATE and SAT_STATE)
+ - Make it not static?
  - in README, add example function calls
 
  - Make this a module, return a dict from main, etc... (include state_machine)
+ - Update ReadMe to add examples for SIMPLIFIED things, too (like using Simulator for dynamics, etc...)
+ - Separate main + state_machine into a module?
 """
 
 using Infiltrator, Test, PrettyTables
@@ -33,10 +34,6 @@ include("state_machine.jl")
 include("reports.jl")
 
 
-
-""" x₀ = initial state (eci is r, v); 
-ℓ is max sim length """
-# Add in verbose for showing plots or not (used for monte carlo)
 function main(; t₀::Epoch = Epoch(2021, 1, 1), N = 6, dt = 0.2, verbose = true, initial_mode::Operation_mode = detumble, num_orbits = 3, albedo_ds = 2, use_albedo = true, term_mode = finished, kwargs...) 
 
 
@@ -254,7 +251,7 @@ end;
 
 # @info "No Noise!"; results = main(; num_orbits = 4, initial_mode = detumble, use_albedo = false, σβ = 0.0, σB = 0.0, σ_gyro = 0.0, σr = 0.0, σ_current = 0.0); 
 # @info "Partial Noise!"; results = main(; num_orbits = 1.25, initial_mode = mag_cal, σB = deg2rad(0.00), σ_current = 0.00);
-@info "Full Noise!"; results = main(; initial_mode = mag_cal, num_orbits = 3.0, use_albedo = true); 
+@info "Full Noise!"; results = main(; initial_mode = mag_cal, num_orbits = 2.01, use_albedo = true); 
 # sat_truth, sat_est, truths, sensors, ecls, noises, states, sat_ests, op_modes 
 
 # display(plot(results[:states]))
@@ -266,6 +263,6 @@ end;
 # Random.seed!(1000)
 # @info "Full Noise!"; results = main(; initial_mode = diode_cal, num_orbits = 0.03, use_albedo = true); 
 # diode_self_consistency(results)
-# eqs, ess, eBs, es₀s, eB₀s = monte_carlo(20)
+# eqs, ess, eBs, es₀s, eB₀s = monte_carlo(30)
 
 println("Done!");
