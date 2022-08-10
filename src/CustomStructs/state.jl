@@ -165,7 +165,7 @@ function normalize_quat(x::STATE)
     return STATE(x.r, x.v, q, x.ω, x.β)
 end
 
-# Define addition, multiplication, and subtraction?  (NEEDED for RK4)
+# Define addition, multiplication, and subtraction  (NEEDED for RK4)
 function Base.:+(x₁::STATE, x₂::STATE) 
     r = x₁.r + x₂.r 
     v = x₁.v + x₂.v 
@@ -184,7 +184,6 @@ function Base.:*(k::Real, x::STATE)
     ω = k * x.ω  
     β = k * x.β  
 
-    # q /= norm(q)
     return STATE(r, v, q, ω, β)
 end
 

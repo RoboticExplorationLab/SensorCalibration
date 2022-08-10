@@ -14,6 +14,7 @@ struct NOISE{N, T}
     pos::SVector{3, T}          # Noise in the position estimate 
 end
 
+
 """ plot(n, t; start, stop, ds, kwargs)
 
       Plotting recipe for a vector of NOISE structs. Can plot all the noise for the three tracked sensor measurements

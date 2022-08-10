@@ -1,4 +1,4 @@
-# [src/MissionSim/CustomStructs/flags.jl]
+# [src/CustomStructs/flags.jl]
 
 """ FLAGS 
 

@@ -35,7 +35,7 @@ struct MAGNETOMETER{T}
             return MAGNETOMETER(sf, noa, b);
         else # Make a noisy one
             sf  = rand(Normal(1.0, 0.2), 3) 
-            noa = rand(Normal(0.0, deg2rad(3.0)), 3) 
+            noa = rand(Normal(0.0, deg2rad(4.0)), 3) 
             b   = rand(Normal(0.0, 1.0), 3)
             return MAGNETOMETER(SVector{3, Float64}(sf), SVector{3, Float64}(noa), SVector{3, Float64}(b))
         end
