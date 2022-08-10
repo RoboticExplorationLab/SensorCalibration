@@ -1,10 +1,9 @@
 # [src/Estimator/mekf.jl]
 
 """ To Do:
-
- - A (in prediction) does not appear to be correct..., and maybe Hb and Hi, too
+ - Jacobian matrices A, Hb, and Hi do not quite match up with ForwardDiff
  - current_measurement is slow (~ ms)
-
+ - Verify that W/V can be full diagonal?
 """
 
 """
@@ -30,7 +29,7 @@ struct MEKF_DATA{T}
                             angle_random_walk     = 0.06)  # in deg/sqrt(hour)
 
         """ Generates a new MEKF_DATA by generating the W and V matrices with the provided values """
-
+    
         ## Process Noise:
         σ_gyro = 5e-4 # 1.22e-4 * dt # deg2rad(gyro_bias_instability) / 3600.0  # Convert (deg/hour) to (rad/sec)
         σ_bias = 5e-5 # 1.45e-5 * dt # deg2rad(angle_random_walk) / 60.0        # Convert (deg/sqrt(hour)) to ( rad/sqrt(s) )
@@ -57,6 +56,8 @@ end
     calibration values if the flag is set to true.
 
     Note that this covariance uses 3 parameters for the attitude to prevent dropping rank.
+
+    Currently, it is not used!
 """
 function reset_cov!(sat::SATELLITE{N, T}; reset_calibration = false, σϕ = deg2rad(10), σβ = deg2rad(10), 
                         σC = 0.3, σα = deg2rad(9), σϵ = deg2rad(9)) where {N, T}
@@ -127,7 +128,6 @@ function estimate(sat::SATELLITE{N, T}, sens::SENSORS{N, T}, noise::MEKF_DATA{T}
 
 
     # Process result and update sat (by making a new copy)
-
     sat⁺ = SATELLITE(deepcopy(sat.J), MAGNETOMETER(sat.magnetometer.scale_factors, sat.magnetometer.non_ortho_angles, sat.magnetometer.bias),
                             diodes⁺, x⁺, copy(sat.covariance) )
 
@@ -175,7 +175,6 @@ function sqrt_mekf(x::SAT_STATE{T}, diodes::DIODES{N, T}, Pchol::Matrix{T}, alb:
     # Kalman Gain (how much we trust the measurement over the dynamics)
     Pchol_yy = qrᵣ([Pchol_pred * H'; V])
     L = (((Pchol_pred' * Pchol_pred * H') / Pchol_yy) / Pchol_yy')
-    # ^ the above is the same as Pp * H' * inv(Pyy), for non-sqrt
 
     # Update 
     x⁺, diodes⁺ = update(x_pred, diodes, L, z; calibrate_diodes = calibrate_diodes) 
@@ -279,15 +278,6 @@ function prediction(x::SAT_STATE{T}, ω::SVector{3, T}, dt::T, N::Int; calibrate
 
     x⁺ = update_state(x; q = q⁺)  # Doesn't matter if we are calibrating diodes, only q changes in prediction
 
-    # Calculate Jacobian ∂f/∂x
-
-    # θ = dt * nγ
-    # γ̂ = -hat(γ / nγ)  # Skew-symmetric matrix 
-    # R = (nγ == 0.0) ? I(3)  :  # Avoid the divide-by-zero error
-    #                   I(3) - (γ̂ ) * sin(θ) + ((γ̂ )^2) * (1 - cos(θ)); # Rodrigues formula
-    # @debug R ≈ exp(-hat(ω - x.β) * dt) "Error in R!"
-            
-    
     A = zeros(T, 6, 6)     # Jacobian of f(x) wrt x,   A  =   [R   -dt I₃;  0₃  I₃]
 
     _nextq_q(_q) = nextq(_q, ω, x.β, dt)[1]

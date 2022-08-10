@@ -1,10 +1,8 @@
 # [src/Estimator/magnetometer_calibration.jl]
 
 """ To Do:
-      Add:
-       - Way to deal with failures
-
-    - Because we are just using mag, we are really just passing in Bᴵ_exp as Bᴮ_exp -> verify and update comments 
+  - There is no method to deal with failure cases
+  - Because we are just using magnitude, we are really just passing in Bᴵ_exp instead of Bᴮ_exp 
 """
 
 

@@ -2,6 +2,8 @@
 #                      STANDARD MEKF                               #
 ####################################################################
 
+""" This code is very old and needs to be updated. A lot. Mostly just keeping in case I ever decide to update it """
+
 @info "Not sure I am splitting up covariance into the three matrices correctly! (Shouldn't be diagonal...?)"
 mutable struct MEKF_DATA 
     albedo::ALBEDO  #  Albedo Struct
